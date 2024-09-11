@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package nebius_observability_agent_updater;
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nebius/nebius-observability-agent/generated";
+
+enum AppState {
+  NORMAL = 0;
+  UPDATING = 1;
+  SHUTDOWN = 3;
+}
+message StorageState {
+  google.protobuf.Timestamp last_updated = 1;
+  AppState app_state = 2;
+  string stable_version = 3;
+  string new_version = 4;
+}
