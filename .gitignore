@@ -1,0 +1,20 @@
+*.swp
+*.swo
+
+# GoLand IDEA
+/.idea/
+*.iml
+
+# VS Code
+.vscode
+*.code-workspace
+
+# Miscellaneous files
+*.sw[op]
+*.DS_Store
+
+# Wix
+*.wixobj
+*.wixpdb
+
+go.work*
