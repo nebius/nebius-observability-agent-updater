@@ -61,10 +61,3 @@ jobs:
           make test
         env:
           YC_BINARY: /opt/yc/bin/yc
-      - name: Upload tests log
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-log
-          path: /tmp/nebius-otel-collector-tests.log
-          if-no-files-found: error

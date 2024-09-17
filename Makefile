@@ -31,6 +31,8 @@ build:
 tidy:
 	go mod tidy
 
-.PHONY: lint
 lint:
 	golangci-lint run -c .golangci.yaml
+
+test:
+	go test -v ./...
