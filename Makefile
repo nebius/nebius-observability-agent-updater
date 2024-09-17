@@ -22,11 +22,15 @@ install-tools:
 
 # Run the application
 run:
-	go run cmd/myawesomeapp/main.go
+	go run cmd/nebius-observability-agent-updater/main.go
 
 # Build the application
 build:
-	go build -o myawesomeapp cmd/myawesomeapp/main.go
+	go build -o nebius-observability-agent-updater cmd/nebius-observability-agent-updater/main.go
 
 tidy:
 	go mod tidy
+
+.PHONY: lint
+lint:
+	golangci-lint run -c .golangci.yaml

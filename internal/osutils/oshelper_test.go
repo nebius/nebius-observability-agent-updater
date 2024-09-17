@@ -1,4 +1,4 @@
-package debwrapper
+package osutils
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 )
 
 func TestGetDebPackageVersion(t *testing.T) {
+	o := NewOsHelper()
 	// Check if dpkg is available
 	_, err := exec.LookPath("dpkg-query")
 	if err != nil {
@@ -36,15 +37,17 @@ func TestGetDebPackageVersion(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			debWrapper := NewDebWrapper()
-			result, err := debWrapper.GetDebVersion(tc.packageName)
+			result, err := o.GetDebVersion(tc.packageName)
 
 			if tc.expectError && err == nil {
 				t.Errorf("Expected an error for package %s, but got none", tc.packageName)
 			}
 
-			if !tc.expectError && err != nil && !errors.Is(err, ErrDebNotFound) {
+			if !tc.expectError && err != nil {
 				t.Errorf("Unexpected error for package %s: %v", tc.packageName, err)
+			}
+			if tc.expectError && err != nil && !errors.Is(err, ErrDebNotFound) {
+				t.Errorf("Expected error %v for package %s, but got %v", ErrDebNotFound, tc.packageName, err)
 			}
 
 			if !tc.expectError && result == "" {

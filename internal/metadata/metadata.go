@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -13,26 +14,28 @@ type Config struct {
 }
 
 type Reader struct {
-	cfg Config
+	cfg    Config
+	logger *slog.Logger
 }
 
-func NewReader(cfg Config) *Reader {
-	return &Reader{cfg: cfg}
+func NewReader(cfg Config, logger *slog.Logger) *Reader {
+	return &Reader{cfg: cfg, logger: logger}
 }
 
 func (r *Reader) GetParentId() (string, error) {
-	return readAndTrimFile(r.cfg.Path + "/" + r.cfg.ParentIdFilename)
+	return r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.ParentIdFilename)
 }
 
 func (r *Reader) GetInstanceId() (string, error) {
-	return readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
+	return r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
 }
 
 func (r *Reader) GetIamToken() (string, error) {
-	return readAndTrimFile(r.cfg.Path + "/" + r.cfg.IamTokenFilename)
+	return r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.IamTokenFilename)
 }
 
-func readAndTrimFile(filename string) (string, error) {
+func (r *Reader) readAndTrimFile(filename string) (string, error) {
+	r.logger.Debug("Reading file", "filename", filename)
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		return "", err

@@ -18,3 +18,5 @@
 *.wixpdb
 
 go.work*
+
+nebius-observability-agent-updater
