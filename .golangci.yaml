@@ -19,7 +19,7 @@ linters:
     - errchkjson # Checks types passed to the json encoding functions. Reports unsupported types and optionally reports occasions, where the check for the returned error can be omitted.
     - errname # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
     - errorlint # Errorlint is a linter for that can be used to find code that will cause problems with the error wrapping scheme introduced in Go 1.13.
-    - exportloopref # Checks for pointers to enclosing loop variables.
+    - copyloopvar
     - gocheckcompilerdirectives # Checks that go compiler directive comments (//go:) are valid.
     - gocognit # Computes and checks the cognitive complexity of functions.
     - goconst # Finds repeated strings that could be replaced by a constant.
