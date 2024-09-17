@@ -18,10 +18,9 @@ type Config struct {
 
 func GetDefaultConfig() *Config {
 	return &Config{
-		StatePath: "/var/lib/nebius-observability-agent-updater/state",
-		//PollInterval: 60 * time.Minute,
-		PollInterval: 5 * time.Second,
-		PollJitter:   0,
+		StatePath:    "/var/lib/nebius-observability-agent-updater/state",
+		PollInterval: 60 * time.Minute,
+		PollJitter:   time.Minute,
 		Metadata: metadata.Config{
 			Path:               "/tmp/cloud-metadata",
 			ParentIdFilename:   "parent-id",
