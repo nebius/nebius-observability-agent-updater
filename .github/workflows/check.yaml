@@ -68,10 +68,3 @@ jobs:
           name: test-log
           path: /tmp/nebius-otel-collector-tests.log
           if-no-files-found: error
-      - name: Upload tmp folder
-        uses: actions/upload-artifact@v2
-        if: always()
-        with:
-          name: tests-data
-          path: /tmp/nebius-otel-collector
-          if-no-files-found: error
