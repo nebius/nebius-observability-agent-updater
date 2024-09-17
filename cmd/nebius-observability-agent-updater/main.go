@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"github.com/nebius/nebius-observability-agent-updater/internal/application"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
@@ -36,7 +35,9 @@ func main() {
 	oh := osutils.NewOsHelper()
 	cli, err := client.New(metadataReader, oh, &cfg.GRPC, logger)
 	if err != nil {
-		log.Fatal("failed to create client: ", err)
+		logger.Error("failed to create client", "error", err)
+		defer syscall.Exit(1)
+		return
 	}
 
 	app := application.New(cfg, stateStorage, cli, logger)
@@ -56,20 +57,20 @@ func main() {
 	select {
 	case err := <-errChan:
 		if err != nil {
-			fmt.Printf("App exited with error: %v\n", err)
+			logger.Error("App exited with error", "error", err)
 			exitCode = 1
 		} else {
-			fmt.Println("App exited successfully")
+			logger.Info("App shut down gracefully")
 		}
 	case sig := <-sigChan:
-		fmt.Printf("\nReceived signal: %v. Cancelling context...\n", sig)
+		logger.Info("Received signal, cancelling context", "signal", sig)
 		cancel()         // Cancel the context
 		err := <-errChan // Wait for the app to finish
 		if err != nil {
-			fmt.Printf("App exited with error: %v\n", err)
+			logger.Error("App exited with error", "error", err)
 			exitCode = 1
 		} else {
-			fmt.Println("App shut down gracefully")
+			logger.Info("App shut down gracefully")
 		}
 	}
 	defer os.Exit(exitCode)
