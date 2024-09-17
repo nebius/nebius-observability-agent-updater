@@ -59,5 +59,3 @@ jobs:
         run: |
           set -euo pipefail
           make test
-        env:
-          YC_BINARY: /opt/yc/bin/yc
