@@ -1,0 +1,58 @@
+run:
+  timeout: 30m # big timeout as github actions are sloow
+  allow-parallel-runners: true
+linters:
+  disable-all: true
+  enable:
+    - errcheck # Errcheck is a program for checking for unchecked errors in Go code. These unchecked errors can be critical bugs in some cases
+    - gosimple # Linter for Go source code that specializes in simplifying code
+    - govet # Vet examines Go source code and reports suspicious constructs, such as Printf calls whose arguments do not align with the format string.
+    - ineffassign # Detects when assignments to existing variables are not used
+    - staticcheck # It's a set of rules from staticcheck. It's not the same thing as the staticcheck binary. The author of staticcheck doesn't support or approve the use of staticcheck as a library inside golangci-lint.
+    - typecheck # like the front-end of a Go compiler, parses and type-checks Go code
+    - unused # Checks Go code for unused constants, variables, functions and types.
+    - bodyclose # Checks whether HTTP response body is closed successfully.
+    - decorder # Check declaration order and count of types, constants, variables and functions.
+    - dogsled # Checks assignments with too many blank identifiers (e.g. x, , , _, := f()).
+    - dupword # Checks for duplicate words in the source code
+    - durationcheck # Check for two durations multiplied together.
+    - errchkjson # Checks types passed to the json encoding functions. Reports unsupported types and optionally reports occasions, where the check for the returned error can be omitted.
+    - errname # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
+    - errorlint # Errorlint is a linter for that can be used to find code that will cause problems with the error wrapping scheme introduced in Go 1.13.
+    - copyloopvar
+    - gocheckcompilerdirectives # Checks that go compiler directive comments (//go:) are valid.
+    - gocognit # Computes and checks the cognitive complexity of functions.
+    - goconst # Finds repeated strings that could be replaced by a constant.
+    - gocritic # Provides diagnostics that check for bugs, performance and style issues.
+    - gocyclo # Computes and checks the cyclomatic complexity of functions.
+    - gofmt # Gofmt checks whether code was gofmt-ed. By default this tool runs with -s option to check for code simplification.
+    - importas # Enforces consistent import
+    - interfacebloat # A linter that checks the number of methods inside an interface.
+    - lll # Reports long lines.
+    - makezero # Finds slice declarations with non-zero initial length.
+    - misspell # Finds commonly misspelled English words in comments.
+    - nakedret # Finds naked returns in functions greater than a specified function length.
+    - nestif # Reports deeply nested if statements.
+    - noctx # Noctx finds sending http request without context.Context.
+    - prealloc # Finds slice declarations that could potentially be pre-allocated.
+    - predeclared # Find code that shadows one of Go's predeclared identifiers.
+    - reassign # Checks that package variables are not reassigned.
+    - tenv # Tenv is analyzer that detects using os.Setenv instead of t.Setenv since Go1.17.
+    - unconvert # Remove unnecessary type conversions.
+    - unparam # Reports unused function parameters.
+    - usestdlibvars # A linter that detect the possibility to use variables/constants from the Go standard library.
+    - whitespace # Tool for detection of leading and trailing whitespace.
+linters-settings:
+  gocognit:
+    min-complexity: 30
+  govet:
+    # report about shadowed variables
+    check-shadowing: false
+  lll:
+    # Max line length, lines longer will be reported.
+    # '\t' is counted as 1 character by default, and can be changed with the tab-width option.
+    # Default: 120.
+    line-length: 200
+  gocritic:
+    disabled-checks:
+      - ifElseChain
