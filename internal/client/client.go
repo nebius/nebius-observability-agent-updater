@@ -41,11 +41,29 @@ type GRPCConfig struct {
 	Retry    RetryConfig   `yaml:"retry"`
 }
 
+func GetDefaultGrpcConfig() GRPCConfig {
+	return GRPCConfig{
+		Endpoint: "observability-agent-manager.eu-north1.nebius.cloud:443",
+		Insecure: false,
+		Timeout:  5 * time.Second,
+		Retry:    GetDefaultRetryConfig(),
+	}
+}
+
 type RetryConfig struct {
 	MaxElapsedTime      time.Duration `yaml:"max_elapsed_time"`
 	InitialInterval     time.Duration `yaml:"initial_interval"`
 	Multiplier          float64       `yaml:"multiplier"`
 	RandomizationFactor float64       `yaml:"randomization_factor"`
+}
+
+func GetDefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxElapsedTime:      time.Second * 30,
+		InitialInterval:     time.Second,
+		Multiplier:          1.5,
+		RandomizationFactor: 0.5,
+	}
 }
 
 type TLSConfig struct {
@@ -55,12 +73,13 @@ type TLSConfig struct {
 }
 
 type Client struct {
-	metadata metadataReader
-	config   *GRPCConfig
-	conn     *grpc.ClientConn
-	client   generated.VersionServiceClient
-	logger   *slog.Logger
-	oh       oshelper
+	metadata     metadataReader
+	config       *GRPCConfig
+	conn         *grpc.ClientConn
+	client       generated.VersionServiceClient
+	logger       *slog.Logger
+	oh           oshelper
+	retryBackoff backoff.BackOff
 }
 
 func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.Logger) (*Client, error) {
@@ -74,17 +93,28 @@ func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.
 	}
 	conn, err := grpc.NewClient(config.Endpoint, dialOptions...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create grpc clienti to %s: %w", config.Endpoint, err)
+		return nil, fmt.Errorf("failed to create grpc client to %s: %w", config.Endpoint, err)
 	}
 	client := generated.NewVersionServiceClient(conn)
+
 	return &Client{
-		metadata: metadata,
-		config:   config,
-		conn:     conn,
-		client:   client,
-		logger:   logger,
-		oh:       oh,
+		metadata:     metadata,
+		config:       config,
+		conn:         conn,
+		client:       client,
+		logger:       logger,
+		oh:           oh,
+		retryBackoff: getRetryBackoff(config.Retry),
 	}, nil
+}
+
+func getRetryBackoff(config RetryConfig) backoff.BackOff {
+	retryBackoff := backoff.NewExponentialBackOff()
+	retryBackoff.MaxElapsedTime = config.MaxElapsedTime
+	retryBackoff.RandomizationFactor = config.RandomizationFactor
+	retryBackoff.InitialInterval = config.InitialInterval
+	retryBackoff.Multiplier = config.Multiplier
+	return retryBackoff
 }
 
 func (s *Client) Close() {
@@ -93,12 +123,9 @@ func (s *Client) Close() {
 	}
 }
 
-func (s *Client) SendAgentData(agent agents.AgentData, isAgentHealthy bool) (*generated.GetVersionResponse, error) {
+func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionResponse, error) {
 	s.logger.Debug("Sending agent data", "agent", agent.GetServiceName())
-	req, err := s.fillRequest(agent, isAgentHealthy)
-	if err != nil {
-		return nil, err
-	}
+	req := s.fillRequest(agent)
 	var response *generated.GetVersionResponse
 	operation := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.Timeout)
@@ -111,14 +138,7 @@ func (s *Client) SendAgentData(agent agents.AgentData, isAgentHealthy bool) (*ge
 		response = r
 		return nil
 	}
-
-	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = s.config.Retry.MaxElapsedTime
-	b.RandomizationFactor = s.config.Retry.RandomizationFactor
-	b.InitialInterval = s.config.Retry.InitialInterval
-	b.Multiplier = s.config.Retry.Multiplier
-
-	err = backoff.Retry(operation, b)
+	err := backoff.Retry(operation, s.retryBackoff)
 	if err != nil {
 		return nil, fmt.Errorf("all retries failed: %w", err)
 	}
@@ -127,63 +147,70 @@ func (s *Client) SendAgentData(agent agents.AgentData, isAgentHealthy bool) (*ge
 	return response, nil
 }
 
-func (s *Client) fillRequest(agent agents.AgentData, isAgentHealthy bool) (*generated.GetVersionRequest, error) {
+func (s *Client) fillRequest(agent agents.AgentData) *generated.GetVersionRequest {
 	req := generated.GetVersionRequest{}
 	req.Type = agent.GetAgentType()
 
 	agentVersion, err := s.oh.GetDebVersion(agent.GetDebPackageName())
 	if err != nil {
 		if !errors.Is(err, osutils.ErrDebNotFound) {
-			return nil, fmt.Errorf("failed to get agent version: %w", err)
+			s.logger.Error("failed to get agent version", "error", err)
+		} else {
+			s.logger.Info("agent is not installed", "package", agent.GetDebPackageName())
 		}
-		agentVersion = ""
+	} else {
+		req.AgentVersion = agentVersion
 	}
-	req.AgentVersion = agentVersion
 
 	updaterVersion, err := s.oh.GetDebVersion(constants.UpdaterDebPackageName)
 	if err != nil {
 		if !errors.Is(err, osutils.ErrDebNotFound) {
-			return nil, fmt.Errorf("failed to get updater version: %w", err)
+			s.logger.Error("failed to get updater version", "error", err)
+		} else {
+			s.logger.Info("updater is not installed", "package", constants.UpdaterDebPackageName)
 		}
-		updaterVersion = ""
+	} else {
+		req.UpdaterVersion = updaterVersion
 	}
-
-	req.UpdaterVersion = updaterVersion
 
 	parentId, err := s.metadata.GetParentId()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get parent id: %w", err)
+		s.logger.Error("failed to get parent id", "error", err)
+	} else {
+		req.ParentId = parentId
 	}
-	req.ParentId = parentId
 
 	instanceId, err := s.metadata.GetInstanceId()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get instance id: %w", err)
+		s.logger.Error("failed to get instance id", "error", err)
+	} else {
+		req.InstanceId = instanceId
 	}
-	req.InstanceId = instanceId
 	osinfo := generated.OSInfo{}
 	osName, err := s.oh.GetOsName()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get os name: %w", err)
+		s.logger.Error("failed to get os name", "error", err)
+	} else {
+		osinfo.Name = osName
 	}
-	osinfo.Name = osName
 
 	uname, err := s.oh.GetUname()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get uname: %w", err)
+		s.logger.Error("failed to get uname", "error", err)
+	} else {
+		osinfo.Uname = uname
 	}
-
-	osinfo.Uname = uname
 
 	arch, err := s.oh.GetArch()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get arch: %w", err)
+		s.logger.Error("failed to get arch", "error", err)
+	} else {
+		osinfo.Architecture = arch
 	}
-	osinfo.Architecture = arch
 
 	req.OsInfo = &osinfo
 
-	if isAgentHealthy {
+	if agent.IsAgentHealthy() {
 		req.AgentState = generated.AgentState_STATE_HEALTHY
 	} else {
 		req.AgentState = generated.AgentState_STATE_ERROR
@@ -191,20 +218,23 @@ func (s *Client) fillRequest(agent agents.AgentData, isAgentHealthy bool) (*gene
 
 	agentUptime, err := s.oh.GetServiceUptime(agent.GetServiceName())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get agent uptime: %w", err)
+		s.logger.Error("failed to get agent uptime", "error", err)
+	} else {
+		req.AgentUptime = durationpb.New(agentUptime)
 	}
-	req.AgentUptime = durationpb.New(agentUptime)
 
 	updaterUptime, err := s.oh.GetServiceUptime(constants.UpdaterServiceName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get updater uptime: %w", err)
+		s.logger.Error("failed to get updater uptime", "error", err)
+	} else {
+		req.UpdaterUptime = durationpb.New(updaterUptime)
 	}
-	req.UpdaterUptime = durationpb.New(updaterUptime)
 
 	systemUptime, err := s.oh.GetSystemUptime()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get system uptime: %w", err)
+		s.logger.Error("failed to get system uptime", "error", err)
+	} else {
+		req.SystemUptime = durationpb.New(systemUptime)
 	}
-	req.SystemUptime = durationpb.New(systemUptime)
-	return &req, nil
+	return &req
 }

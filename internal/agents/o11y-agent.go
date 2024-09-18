@@ -30,3 +30,7 @@ func (o *O11yagent) GetHealthCheckUrl() string {
 func (o *O11yagent) GetSystemdServiceName() string {
 	return "nebius-observability-agent"
 }
+
+func (o *O11yagent) IsAgentHealthy() bool {
+	return true
+}

@@ -6,4 +6,5 @@ type AgentData interface {
 	GetAgentType() generated.AgentType
 	GetDebPackageName() string
 	GetServiceName() string
+	IsAgentHealthy() bool
 }

@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"google.golang.org/grpc/codes"
@@ -106,6 +105,10 @@ func (m *mockAgentData) GetServiceName() string {
 	args := m.Called()
 	return args.String(0)
 }
+func (m *mockAgentData) IsAgentHealthy() bool {
+	args := m.Called()
+	return args.Bool(0)
+}
 
 func TestNew(t *testing.T) {
 	metadata := &mockMetadataReader{}
@@ -129,9 +132,10 @@ func TestSendAgentData(t *testing.T) {
 	mockClient := &mockVersionServiceClient{}
 
 	client := &Client{
-		metadata: metadata,
-		oh:       oh,
-		client:   mockClient,
+		metadata:     metadata,
+		oh:           oh,
+		client:       mockClient,
+		retryBackoff: getRetryBackoff(GetDefaultRetryConfig()),
 		config: &GRPCConfig{
 			Timeout: 5 * time.Second,
 		},
@@ -157,8 +161,9 @@ func TestSendAgentData(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("IsAgentHealthy").Return(true)
 
-	response, err := client.SendAgentData(agentData, true)
+	response, err := client.SendAgentData(agentData)
 
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResponse, response)
@@ -175,9 +180,10 @@ func TestFillRequest(t *testing.T) {
 	oh := &mockOSHelper{}
 
 	client := &Client{
-		metadata: metadata,
-		oh:       oh,
-		logger:   slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		metadata:     metadata,
+		oh:           oh,
+		retryBackoff: getRetryBackoff(GetDefaultRetryConfig()),
+		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Set up mock expectations
@@ -194,10 +200,10 @@ func TestFillRequest(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("IsAgentHealthy").Return(true)
 
-	req, err := client.fillRequest(agentData, true)
+	req := client.fillRequest(agentData)
 
-	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, generated.AgentType_O11Y_AGENT, req.Type)
 	assert.Equal(t, "1.0.0", req.AgentVersion)
@@ -236,6 +242,8 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
+	client.retryBackoff = getRetryBackoff(client.config.Retry)
+
 	// Set up mock expectations
 	metadata.On("GetParentId").Return("parent-123", nil)
 	metadata.On("GetInstanceId").Return("instance-456", nil)
@@ -262,8 +270,9 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("IsAgentHealthy").Return(true)
 
-	response, err := client.SendAgentData(agentData, true)
+	response, err := client.SendAgentData(agentData)
 
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResponse, response)
@@ -298,6 +307,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
+	client.retryBackoff = getRetryBackoff(client.config.Retry)
 
 	// Set up mock expectations (same as in the previous test)
 	metadata.On("GetParentId").Return("parent-123", nil)
@@ -317,8 +327,9 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("IsAgentHealthy").Return(true)
 
-	response, err := client.SendAgentData(agentData, true)
+	response, err := client.SendAgentData(agentData)
 
 	assert.Error(t, err)
 	assert.Nil(t, response)
@@ -334,169 +345,22 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.AssertExpectations(t)
 }
 
-func TestFillRequestErrors(t *testing.T) {
-	metadata := &mockMetadataReader{}
-	oh := &mockOSHelper{}
-
-	client := &Client{
-		metadata: metadata,
-		oh:       oh,
-		logger:   slog.New(slog.NewTextHandler(os.Stdout, nil)),
-	}
-
-	agentData := &mockAgentData{}
-	agentData.On("GetServiceName").Return("test-agent")
-	agentData.On("GetDebPackageName").Return("test-agent-package")
-	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
-
-	testCases := []struct {
-		name        string
-		setupMocks  func()
-		expectedErr string
-	}{
-		{
-			name: "GetDebVersion agent error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", "test-agent-package").Return("", errors.New("deb version error"))
-			},
-			expectedErr: "failed to get agent version: deb version error",
-		},
-		{
-			name: "GetDebVersion updater error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", "test-agent-package").Return("1.0.0", nil)
-				oh.On("GetDebVersion", "nebius-observability-agent-updater").Return("", errors.New("updater version error"))
-			},
-			expectedErr: "failed to get updater version: updater version error",
-		},
-		{
-			name: "GetParentId error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("", errors.New("parent id error"))
-			},
-			expectedErr: "failed to get parent id: parent id error",
-		},
-		{
-			name: "GetInstanceId error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("", errors.New("instance id error"))
-			},
-			expectedErr: "failed to get instance id: instance id error",
-		},
-		{
-			name: "GetOsName error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("instance-456", nil)
-				oh.On("GetOsName").Return("", errors.New("os name error"))
-			},
-			expectedErr: "failed to get os name: os name error",
-		},
-		{
-			name: "GetUname error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("instance-456", nil)
-				oh.On("GetOsName").Return("Linux", nil)
-				oh.On("GetUname").Return("", errors.New("uname error"))
-			},
-			expectedErr: "failed to get uname: uname error",
-		},
-		{
-			name: "GetArch error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("instance-456", nil)
-				oh.On("GetOsName").Return("Linux", nil)
-				oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
-				oh.On("GetArch").Return("", errors.New("arch error"))
-			},
-			expectedErr: "failed to get arch: arch error",
-		},
-		{
-			name: "GetServiceUptime agent error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("instance-456", nil)
-				oh.On("GetOsName").Return("Linux", nil)
-				oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
-				oh.On("GetArch").Return("x86_64", nil)
-				oh.On("GetServiceUptime", "test-agent").Return(time.Duration(0), errors.New("agent uptime error"))
-			},
-			expectedErr: "failed to get agent uptime: agent uptime error",
-		},
-		{
-			name: "GetServiceUptime updater error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("instance-456", nil)
-				oh.On("GetOsName").Return("Linux", nil)
-				oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
-				oh.On("GetArch").Return("x86_64", nil)
-				oh.On("GetServiceUptime", "nebius_observability_agent_updater").Return(time.Duration(0), errors.New("updater uptime error"))
-				oh.On("GetServiceUptime", "test-agent").Return(10*time.Minute, nil)
-			},
-			expectedErr: "failed to get updater uptime: updater uptime error",
-		},
-		{
-			name: "GetSystemUptime error",
-			setupMocks: func() {
-				oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
-				metadata.On("GetParentId").Return("parent-123", nil)
-				metadata.On("GetInstanceId").Return("instance-456", nil)
-				oh.On("GetOsName").Return("Linux", nil)
-				oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
-				oh.On("GetArch").Return("x86_64", nil)
-				oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
-				oh.On("GetSystemUptime").Return(time.Duration(0), errors.New("system uptime error"))
-			},
-			expectedErr: "failed to get system uptime: system uptime error",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Reset mocks
-			metadata.ExpectedCalls = nil
-			oh.ExpectedCalls = nil
-
-			// Setup mocks for this test case
-			tc.setupMocks()
-
-			_, err := client.fillRequest(agentData, true)
-
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tc.expectedErr)
-
-			// Verify expectations
-			metadata.AssertExpectations(t)
-			oh.AssertExpectations(t)
-		})
-	}
-}
-
 func TestFillRequestDebNotFound(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
 
 	client := &Client{
-		metadata: metadata,
-		oh:       oh,
-		logger:   slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		metadata:     metadata,
+		oh:           oh,
+		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		retryBackoff: getRetryBackoff(GetDefaultRetryConfig()),
 	}
 
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("IsAgentHealthy").Return(true)
 
 	// Set up mock expectations
 	oh.On("GetDebVersion", "test-agent-package").Return("", osutils.ErrDebNotFound)
@@ -509,9 +373,8 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
-	req, err := client.fillRequest(agentData, true)
+	req := client.fillRequest(agentData)
 
-	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, "", req.AgentVersion)
 	assert.Equal(t, "", req.UpdaterVersion)
