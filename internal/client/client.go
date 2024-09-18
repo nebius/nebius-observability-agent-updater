@@ -139,6 +139,7 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionRes
 		return nil
 	}
 	err := backoff.Retry(operation, s.retryBackoff)
+	s.retryBackoff.Reset()
 	if err != nil {
 		return nil, fmt.Errorf("all retries failed: %w", err)
 	}
