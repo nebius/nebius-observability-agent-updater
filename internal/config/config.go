@@ -22,7 +22,7 @@ func GetDefaultConfig() *Config {
 		PollInterval: 60 * time.Minute,
 		PollJitter:   time.Minute,
 		Metadata: metadata.Config{
-			Path:               "/tmp/cloud-metadata",
+			Path:               "/mnt/cloud-metadata",
 			ParentIdFilename:   "parent-id",
 			InstanceIdFilename: "instance-id",
 		},

@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        ;;
+    remove)
+        systemctl disable nebius_observability_agent_updater.service
+        systemctl stop nebius_observability_agent_updater.service
+        rm -rf /var/lib/nebius-observability-agent-updater
+        ;;
+    upgrade|failed-upgrade|disappear)
+        ;;
+    *)
+        # Default case for unknown arguments
+        ;;
+esac
+
+exit 0

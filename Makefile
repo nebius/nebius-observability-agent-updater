@@ -28,6 +28,9 @@ run:
 build:
 	go build -o nebius-observability-agent-updater cmd/nebius-observability-agent-updater/main.go
 
+build-deb: build
+	scripts/build_deb.sh
+
 tidy:
 	go mod tidy
 
@@ -36,3 +39,4 @@ lint:
 
 test:
 	go test -v ./...
+

@@ -19,4 +19,5 @@
 
 go.work*
 
-nebius-observability-agent-updater
+/nebius-observability-agent-updater
+/*.deb

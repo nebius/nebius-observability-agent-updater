@@ -1,0 +1,7 @@
+#!/bin/bash
+set -ex
+systemctl enable nebius_observability_agent_updater.service
+
+systemctl restart nebius_observability_agent_updater.service
+
+mkdir -p /var/lib/nebius-observability-agent-updater

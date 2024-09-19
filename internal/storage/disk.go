@@ -34,6 +34,10 @@ func (ds *DiskStorage) SaveState(state *generated.StorageState) error {
 // LoadState loads the state from disk
 func (ds *DiskStorage) LoadState() (*generated.StorageState, error) {
 	ds.logger.Debug("Loading state", "path", ds.filePath)
+	if _, err := os.Stat(ds.filePath); os.IsNotExist(err) {
+		ds.logger.Info("State file does not exist", "path", ds.filePath)
+		return nil, nil
+	}
 	protoData, err := os.ReadFile(ds.filePath)
 	if err != nil {
 		return nil, err

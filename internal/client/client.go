@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"log/slog"
+	"os"
 	"time"
 )
 
@@ -32,6 +33,10 @@ type oshelper interface {
 	GetUname() (string, error)
 	GetArch() (string, error)
 }
+
+const (
+	ENDPOINT_ENV = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
+)
 
 type GRPCConfig struct {
 	Endpoint string        `yaml:"endpoint"`
@@ -83,6 +88,13 @@ type Client struct {
 }
 
 func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.Logger) (*Client, error) {
+	if config.Endpoint == "" {
+		endpoint := os.Getenv(ENDPOINT_ENV)
+		if endpoint == "" {
+			return nil, fmt.Errorf("endpoint is not set")
+		}
+		config.Endpoint = endpoint
+	}
 	var dialOptions []grpc.DialOption
 	if config.Insecure {
 		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))

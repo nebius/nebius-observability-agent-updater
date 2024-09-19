@@ -1,0 +1,28 @@
+#!/bin/bash
+set -ex
+
+# Sleep for a random number of seconds between 0 and 60
+sleep $((RANDOM % 61))
+
+# Log file
+LOG_FILE="/var/log/nebius-updater-update.log"
+
+# Start logging
+echo "--- Auto apt upgrade started at $(date) ---" >> "$LOG_FILE"
+
+# Update package lists
+sudo apt update -o Dir::Etc::sourcelist="sources.list.d/nebius-observability-agent.list" \
+                -o Dir::Etc::sourceparts="-" \
+                -o APT::Get::List-Cleanup="0"
+if [ $? -ne 0 ]; then
+    echo "Failed to update package lists" >> "$LOG_FILE"
+    exit 1
+fi
+
+# Perform the upgrade
+if ! DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" --only-upgrade install nebius-observability-agent-updater >> "$LOG_FILE" 2>&1; then
+    echo "Failed to perform upgrade" >> "$LOG_FILE"
+    exit 1
+fi
+
+echo "--- Auto apt upgrade completed at $(date) ---" >> "$LOG_FILE"
