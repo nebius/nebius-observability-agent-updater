@@ -1,0 +1,2 @@
+grpc:
+  endpoint: "" # use from ENV

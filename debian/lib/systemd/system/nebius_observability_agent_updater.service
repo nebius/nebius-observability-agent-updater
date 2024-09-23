@@ -1,0 +1,11 @@
+[Unit]
+Description=Nebius observability agent updater
+After=network.target
+
+[Service]
+ExecStart=/usr/sbin/nebius-observability-agent-updater-run.sh
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -17,6 +17,10 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+func tokenFunc() (string, error) {
+	return "token", nil
+}
+
 // Mock implementations
 type mockMetadataReader struct {
 	mock.Mock
@@ -110,6 +114,15 @@ func (m *mockAgentData) IsAgentHealthy() bool {
 	return args.Bool(0)
 }
 
+func (m *mockAgentData) Update(string) error {
+	args := m.Called()
+	return args.Error(0)
+}
+func (m *mockAgentData) Restart() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 func TestNew(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
@@ -119,7 +132,7 @@ func TestNew(t *testing.T) {
 		Timeout:  5 * time.Second,
 	}
 
-	client, err := New(metadata, oh, config, nil)
+	client, err := New(metadata, oh, config, nil, tokenFunc)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.conn)

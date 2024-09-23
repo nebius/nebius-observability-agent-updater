@@ -13,8 +13,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"log/slog"
+	"os"
 	"time"
 )
 
@@ -32,6 +34,10 @@ type oshelper interface {
 	GetUname() (string, error)
 	GetArch() (string, error)
 }
+
+const (
+	ENDPOINT_ENV = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
+)
 
 type GRPCConfig struct {
 	Endpoint string        `yaml:"endpoint"`
@@ -73,16 +79,24 @@ type TLSConfig struct {
 }
 
 type Client struct {
-	metadata     metadataReader
-	config       *GRPCConfig
-	conn         *grpc.ClientConn
-	client       generated.VersionServiceClient
-	logger       *slog.Logger
-	oh           oshelper
-	retryBackoff backoff.BackOff
+	metadata         metadataReader
+	config           *GRPCConfig
+	conn             *grpc.ClientConn
+	client           generated.VersionServiceClient
+	logger           *slog.Logger
+	oh               oshelper
+	retryBackoff     backoff.BackOff
+	getTokenCallback func() (string, error)
 }
 
-func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.Logger) (*Client, error) {
+func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.Logger, getTokenCallback func() (string, error)) (*Client, error) {
+	if config.Endpoint == "" {
+		endpoint := os.Getenv(ENDPOINT_ENV)
+		if endpoint == "" {
+			return nil, fmt.Errorf("endpoint is not set")
+		}
+		config.Endpoint = endpoint
+	}
 	var dialOptions []grpc.DialOption
 	if config.Insecure {
 		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -98,13 +112,14 @@ func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.
 	client := generated.NewVersionServiceClient(conn)
 
 	return &Client{
-		metadata:     metadata,
-		config:       config,
-		conn:         conn,
-		client:       client,
-		logger:       logger,
-		oh:           oh,
-		retryBackoff: getRetryBackoff(config.Retry),
+		metadata:         metadata,
+		config:           config,
+		conn:             conn,
+		client:           client,
+		logger:           logger,
+		oh:               oh,
+		retryBackoff:     getRetryBackoff(config.Retry),
+		getTokenCallback: getTokenCallback,
 	}, nil
 }
 
@@ -130,6 +145,14 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionRes
 	operation := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.Timeout)
 		defer cancel()
+		if s.getTokenCallback != nil {
+			authToken, err := s.getTokenCallback()
+			if err != nil {
+				s.logger.Warn("failed to get auth token", "error", err)
+				return err
+			}
+			ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+authToken)
+		}
 		r, err := s.client.GetVersion(ctx, req)
 		if err != nil {
 			s.logger.Warn("gRPC call failed, retrying", "error", err)
