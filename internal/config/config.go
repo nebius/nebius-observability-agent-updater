@@ -19,12 +19,13 @@ type Config struct {
 func GetDefaultConfig() *Config {
 	return &Config{
 		StatePath:    "/var/lib/nebius-observability-agent-updater/state",
-		PollInterval: 60 * time.Minute,
-		PollJitter:   time.Minute,
+		PollInterval: time.Minute,
+		PollJitter:   30 * time.Second,
 		Metadata: metadata.Config{
 			Path:               "/mnt/cloud-metadata",
 			ParentIdFilename:   "parent-id",
 			InstanceIdFilename: "instance-id",
+			IamTokenFilename:   "tsa-token",
 		},
 		GRPC: client.GetDefaultGrpcConfig(),
 		Logger: loggerhelper.LogConfig{
