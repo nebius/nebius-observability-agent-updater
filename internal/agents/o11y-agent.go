@@ -34,3 +34,13 @@ func (o *O11yagent) GetSystemdServiceName() string {
 func (o *O11yagent) IsAgentHealthy() bool {
 	return true
 }
+
+func (o *O11yagent) Update(_ string) error {
+	//FIXME
+	return nil
+}
+
+func (o *O11yagent) Restart() error {
+	//FIXME
+	return nil
+}

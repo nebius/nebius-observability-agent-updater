@@ -10,7 +10,7 @@ UvgvJ3f2nzwpR9Y9L1ydTHKKbRkALw8=
 =uHpL
 -----END PGP PUBLIC KEY BLOCK-----
 EOF
-echo "deb [signed-by=/etc/apt/keyrings/public-dr-gpg.gpg.pub] https://dr.nebius.cloud/nebius-observability-agent/ testing main" > /etc/apt/sources.list.d/nebius-observability-agent.list
+echo "deb [signed-by=/etc/apt/keyrings/public-dr-gpg.gpg.pub] https://dr.nebius.cloud/ unstable main" > /etc/apt/sources.list.d/nebius-observability-agent.list
 
 sudo apt update -o Dir::Etc::sourcelist="sources.list.d/nebius-observability-agent.list" \
     -o Dir::Etc::sourceparts="-" \

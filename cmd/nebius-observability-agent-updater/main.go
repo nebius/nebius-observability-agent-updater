@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/application"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"github.com/nebius/nebius-observability-agent-updater/internal/loggerhelper"
 	"github.com/nebius/nebius-observability-agent-updater/internal/metadata"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
-	"github.com/nebius/nebius-observability-agent-updater/internal/storage"
 	"log"
 	"os"
 	"os/signal"
@@ -30,17 +30,16 @@ func main() {
 		}
 	}
 	logger := loggerhelper.InitLogger(&cfg.Logger)
-	stateStorage := storage.NewDiskStorage(cfg.StatePath, logger)
 	metadataReader := metadata.NewReader(cfg.Metadata, logger)
 	oh := osutils.NewOsHelper()
-	cli, err := client.New(metadataReader, oh, &cfg.GRPC, logger)
+	cli, err := client.New(metadataReader, oh, &cfg.GRPC, logger, metadataReader.GetIamToken)
 	if err != nil {
 		logger.Error("failed to create client", "error", err)
 		defer syscall.Exit(1)
 		return
 	}
-
-	app := application.New(cfg, stateStorage, cli, logger)
+	agentsList := []agents.AgentData{agents.NewO11yagent()}
+	app := application.New(cfg, cli, logger, agentsList)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

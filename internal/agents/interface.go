@@ -7,4 +7,6 @@ type AgentData interface {
 	GetDebPackageName() string
 	GetServiceName() string
 	IsAgentHealthy() bool
+	Update(string) error
+	Restart() error
 }
