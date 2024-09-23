@@ -48,12 +48,6 @@ func (s *App) poll(agent agents.AgentData) {
 			return
 		}
 	}
-
-}
-
-func (s *App) installNewVersion() {
-	s.logger.Info("Installing new version")
-	// FIXME
 }
 
 func (s *App) Run(ctx context.Context) error {
