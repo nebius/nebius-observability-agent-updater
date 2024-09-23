@@ -48,13 +48,23 @@ func (s *App) poll(agent agents.AgentData) {
 			return
 		}
 	}
+	if response.Action == generated.Action_RESTART {
+		err := agent.Restart()
+		if err != nil {
+			s.logger.Error("Failed to restart agent", "error", err)
+			return
+		}
+	}
 }
 
 func (s *App) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for _, agent := range s.agents {
 		wg.Add(1)
-		go s.runForAgent(ctx, agent)
+		go func(a agents.AgentData) {
+			defer wg.Done()
+			s.runForAgent(ctx, a)
+		}(agent)
 	}
 	wg.Wait()
 	return nil
