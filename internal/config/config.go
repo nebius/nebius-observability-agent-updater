@@ -27,7 +27,7 @@ func GetDefaultConfig() *Config {
 		},
 		GRPC: client.GetDefaultGrpcConfig(),
 		Logger: loggerhelper.LogConfig{
-			LogLevel: "DEBUG",
+			LogLevel: "INFO",
 		},
 	}
 }
