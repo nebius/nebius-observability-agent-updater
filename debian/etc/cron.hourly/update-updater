@@ -9,9 +9,10 @@ LOG_FILE="/var/log/nebius-updater-update.log"
 
 # Start logging
 echo "--- Auto apt upgrade started at $(date) ---" >> "$LOG_FILE"
+listFIle=$(grep -rl "https://dr.nebius.cloud/ stable main" /etc/apt/sources.list.d |head | sed s'|/etc/apt/||g')
 
 # Update package lists
-sudo apt update -o Dir::Etc::sourcelist="sources.list.d/nebius-observability-agent.list" \
+sudo apt update -o Dir::Etc::sourcelist="$listFIle" \
                 -o Dir::Etc::sourceparts="-" \
                 -o APT::Get::List-Cleanup="0"
 if [ $? -ne 0 ]; then
