@@ -148,8 +148,8 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionRes
 		if s.getTokenCallback != nil {
 			authToken, err := s.getTokenCallback()
 			if err != nil {
-				s.logger.Warn("failed to get auth token", "error", err)
-				return err
+				s.logger.Warn("failed to get auth token, sending request with empty token", "error", err)
+				authToken = ""
 			}
 			ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+authToken)
 		}
