@@ -123,7 +123,7 @@ func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.
 		Timeout:             config.KeepAlive.Timeout,
 		PermitWithoutStream: config.KeepAlive.PermitWithoutStream,
 	}))
-	conn, err := grpc.NewClient(config.Endpoint, dialOptions...)
+	conn, err := grpc.NewClient("dns:///"+config.Endpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create grpc client to %s: %w", config.Endpoint, err)
 	}
