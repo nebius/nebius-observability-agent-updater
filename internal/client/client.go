@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"log/slog"
@@ -39,12 +40,19 @@ const (
 	ENDPOINT_ENV = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
 )
 
+type KeepAliveConfig struct {
+	Time                time.Duration `yaml:"time"`
+	Timeout             time.Duration `yaml:"timeout"`
+	PermitWithoutStream bool          `yaml:"permit_without_stream"`
+}
+
 type GRPCConfig struct {
-	Endpoint string        `yaml:"endpoint"`
-	TLS      TLSConfig     `yaml:"tls"`
-	Insecure bool          `yaml:"insecure"`
-	Timeout  time.Duration `yaml:"timeout"`
-	Retry    RetryConfig   `yaml:"retry"`
+	Endpoint  string          `yaml:"endpoint"`
+	TLS       TLSConfig       `yaml:"tls"`
+	Insecure  bool            `yaml:"insecure"`
+	Timeout   time.Duration   `yaml:"timeout"`
+	Retry     RetryConfig     `yaml:"retry"`
+	KeepAlive KeepAliveConfig `yaml:"keep_alive"`
 }
 
 func GetDefaultGrpcConfig() GRPCConfig {
@@ -53,6 +61,11 @@ func GetDefaultGrpcConfig() GRPCConfig {
 		Insecure: false,
 		Timeout:  5 * time.Second,
 		Retry:    GetDefaultRetryConfig(),
+		KeepAlive: KeepAliveConfig{
+			Time:                20 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		},
 	}
 }
 
@@ -105,6 +118,11 @@ func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.
 		// FIXME fill from config
 		dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
 	}
+	dialOptions = append(dialOptions, grpc.WithKeepaliveParams(keepalive.ClientParameters{
+		Time:                config.KeepAlive.Time,
+		Timeout:             config.KeepAlive.Timeout,
+		PermitWithoutStream: config.KeepAlive.PermitWithoutStream,
+	}))
 	conn, err := grpc.NewClient(config.Endpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create grpc client to %s: %w", config.Endpoint, err)
