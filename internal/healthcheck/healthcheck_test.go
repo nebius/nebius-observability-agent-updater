@@ -53,7 +53,7 @@ func TestCheckHealthWithReasons(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				json.NewEncoder(w).Encode(tt.serverResponse)
+				_ = json.NewEncoder(w).Encode(tt.serverResponse)
 			}))
 			defer server.Close()
 
@@ -97,7 +97,7 @@ func TestCheckHealthWithReasons_ServerErrors(t *testing.T) {
 			name: "Invalid JSON response",
 			serverSetup: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("invalid json"))
+					_, _ = w.Write([]byte("invalid json"))
 				}))
 			},
 			wantHealthy: false,
