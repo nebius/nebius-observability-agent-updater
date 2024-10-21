@@ -43,5 +43,8 @@ func CheckHealthWithReasons(endpoint string) (bool, []string) {
 
 	healthy := resp.StatusCode == http.StatusOK
 
+	if !healthy {
+		result.Reasons = append(result.Reasons, fmt.Sprintf("unexpected status code %d", resp.StatusCode))
+	}
 	return healthy, result.Reasons
 }

@@ -35,7 +35,7 @@ func TestCheckHealthWithReasons(t *testing.T) {
 			},
 			statusCode:  http.StatusInternalServerError,
 			wantHealthy: false,
-			wantReasons: []string{"Database connection error", "High CPU usage"},
+			wantReasons: []string{"Database connection error", "High CPU usage", "unexpected status code 500"},
 		},
 		{
 			name: "Empty response",
