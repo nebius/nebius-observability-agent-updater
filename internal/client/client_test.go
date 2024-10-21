@@ -109,9 +109,9 @@ func (m *mockAgentData) GetServiceName() string {
 	args := m.Called()
 	return args.String(0)
 }
-func (m *mockAgentData) IsAgentHealthy() bool {
+func (m *mockAgentData) IsAgentHealthy() (bool, []string) {
 	args := m.Called()
-	return args.Bool(0)
+	return args.Bool(0), args.Get(1).([]string)
 }
 
 func (m *mockAgentData) Update(string) error {
@@ -174,7 +174,7 @@ func TestSendAgentData(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true)
+	agentData.On("IsAgentHealthy").Return(true, []string{})
 
 	response, err := client.SendAgentData(agentData)
 
@@ -213,7 +213,7 @@ func TestFillRequest(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true)
+	agentData.On("IsAgentHealthy").Return(true, []string{})
 
 	req := client.fillRequest(agentData)
 
@@ -283,7 +283,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true)
+	agentData.On("IsAgentHealthy").Return(true, []string{})
 
 	response, err := client.SendAgentData(agentData)
 
@@ -340,7 +340,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true)
+	agentData.On("IsAgentHealthy").Return(true, []string{})
 
 	response, err := client.SendAgentData(agentData)
 
@@ -373,7 +373,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true)
+	agentData.On("IsAgentHealthy").Return(true, []string{})
 
 	// Set up mock expectations
 	oh.On("GetDebVersion", "test-agent-package").Return("", osutils.ErrDebNotFound)

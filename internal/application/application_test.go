@@ -57,8 +57,8 @@ func (m *MockAgentData) GetHealthCheckUrl() string {
 func (m *MockAgentData) GetSystemdServiceName() string {
 	return "nebius-observability-agent"
 }
-func (m *MockAgentData) IsAgentHealthy() bool {
-	return true
+func (m *MockAgentData) IsAgentHealthy() (bool, []string) {
+	return true, nil
 }
 
 func (m *MockAgentData) Restart() error {

@@ -1,6 +1,9 @@
 package agents
 
-import generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+import (
+	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
+)
 
 type O11yagent struct {
 }
@@ -24,15 +27,15 @@ func (o *O11yagent) GetDebPackageName() string {
 }
 
 func (o *O11yagent) GetHealthCheckUrl() string {
-	return "http://localhost:8080/health" // FIXME
+	return "http://localhost:9000/health"
 }
 
 func (o *O11yagent) GetSystemdServiceName() string {
 	return "nebius-observability-agent"
 }
 
-func (o *O11yagent) IsAgentHealthy() bool {
-	return true
+func (o *O11yagent) IsAgentHealthy() (isHealthy bool, messages []string) {
+	return healthcheck.CheckHealthWithReasons(o.GetHealthCheckUrl())
 }
 
 func (o *O11yagent) Update(_ string) error {
