@@ -251,12 +251,13 @@ func (s *Client) fillRequest(agent agents.AgentData) *generated.GetVersionReques
 	}
 
 	req.OsInfo = &osinfo
-
-	if agent.IsAgentHealthy() {
+	healthy, reasons := agent.IsAgentHealthy()
+	if healthy {
 		req.AgentState = generated.AgentState_STATE_HEALTHY
 	} else {
 		req.AgentState = generated.AgentState_STATE_ERROR
 	}
+	req.AgentStateMessages = reasons
 
 	agentUptime, err := s.oh.GetServiceUptime(agent.GetServiceName())
 	if err != nil {

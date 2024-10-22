@@ -6,7 +6,7 @@ type AgentData interface {
 	GetAgentType() generated.AgentType
 	GetDebPackageName() string
 	GetServiceName() string
-	IsAgentHealthy() bool
+	IsAgentHealthy() (bool, []string)
 	Update(string) error
 	Restart() error
 }
