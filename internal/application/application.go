@@ -42,6 +42,7 @@ func (s *App) poll(agent agents.AgentData) {
 			s.logger.Error("Received empty update data")
 			return
 		}
+		s.logger.Info("Updating agent to version", "version", updateData.GetVersion(), "agent", agent.GetServiceName())
 		err := agent.Update(s.config.UpdateRepoScriptPath, updateData.GetVersion())
 		if err != nil {
 			s.logger.Error("Failed to update agent", "error", err)
@@ -49,6 +50,7 @@ func (s *App) poll(agent agents.AgentData) {
 		}
 	}
 	if response.Action == generated.Action_RESTART {
+		s.logger.Info("Restarting agent after service command", "agent", agent.GetServiceName())
 		err := agent.Restart()
 		if err != nil {
 			s.logger.Error("Failed to restart agent", "error", err)

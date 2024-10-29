@@ -22,7 +22,6 @@ var ErrDebNotFound = fmt.Errorf("package not found")
 
 func (o OsHelper) GetDebVersion(name string) (string, error) {
 	cmd := exec.Command("dpkg-query", "-W", "-f=${Version}", name)
-	fmt.Printf("Running command: %v\n", cmd.String())
 	output, err := cmd.Output()
 
 	if err != nil {
