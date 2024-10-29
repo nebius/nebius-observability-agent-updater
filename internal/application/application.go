@@ -42,7 +42,7 @@ func (s *App) poll(agent agents.AgentData) {
 			s.logger.Error("Received empty update data")
 			return
 		}
-		err := agent.Update(updateData.GetVersion())
+		err := agent.Update(s.config.UpdateRepoScriptPath, updateData.GetVersion())
 		if err != nil {
 			s.logger.Error("Failed to update agent", "error", err)
 			return

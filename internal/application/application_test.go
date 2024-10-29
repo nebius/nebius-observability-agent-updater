@@ -38,7 +38,7 @@ func (m *MockAgentData) GetServiceName() string {
 	return args.String(0)
 }
 
-func (m *MockAgentData) Update(version string) error {
+func (m *MockAgentData) Update(updateScriptPath string, version string) error {
 	args := m.Called(version)
 	return args.Error(0)
 }
@@ -59,6 +59,10 @@ func (m *MockAgentData) GetSystemdServiceName() string {
 }
 func (m *MockAgentData) IsAgentHealthy() (bool, []string) {
 	return true, nil
+}
+
+func (m *MockAgentData) GetLastUpdateError() error {
+	return nil
 }
 
 func (m *MockAgentData) Restart() error {
@@ -137,6 +141,7 @@ func TestApp_poll(t *testing.T) {
 			app := &App{
 				client: client,
 				logger: logger,
+				config: config.GetDefaultConfig(),
 			}
 
 			app.poll(agent)

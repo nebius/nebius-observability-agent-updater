@@ -112,3 +112,21 @@ func (o OsHelper) GetArch() (string, error) {
 	}
 	return strings.TrimSpace(string(output)), nil
 }
+
+func (o OsHelper) InstallPackage(packageName string, version string) error {
+	cmd := exec.Command("apt-get", "install", "-y", packageName+"="+version)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to install package %s=%s: %w: %s", packageName, version, err, output)
+	}
+	return nil
+}
+
+func (o OsHelper) UpdateRepo(scriptPath string) error {
+	cmd := exec.Command(scriptPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to update repo: %w: %s", err, output)
+	}
+	return nil
+}

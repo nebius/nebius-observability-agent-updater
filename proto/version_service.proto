@@ -30,6 +30,7 @@ message GetVersionRequest {
   google.protobuf.Duration system_uptime = 9;
   google.protobuf.Duration updater_uptime = 10;
   repeated string agent_state_messages = 11;
+  string last_update_error= 12;
 }
 
 
