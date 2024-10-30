@@ -27,7 +27,7 @@ func (o *O11yagent) GetDebPackageName() string {
 }
 
 func (o *O11yagent) GetHealthCheckUrl() string {
-	return "http://localhost:54783/health"
+	return "http://127.0.0.1:54783/health"
 }
 
 func (o *O11yagent) GetSystemdServiceName() string {
