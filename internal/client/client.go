@@ -279,5 +279,10 @@ func (s *Client) fillRequest(agent agents.AgentData) *generated.GetVersionReques
 	} else {
 		req.SystemUptime = durationpb.New(systemUptime)
 	}
+
+	lastError := agent.GetLastUpdateError()
+	if lastError != nil {
+		req.LastUpdateError = lastError.Error()
+	}
 	return &req
 }

@@ -8,17 +8,19 @@ import (
 )
 
 type Config struct {
-	PollInterval time.Duration          `yaml:"poll_interval"`
-	PollJitter   time.Duration          `yaml:"poll_jitter"`
-	Metadata     metadata.Config        `yaml:"metadata"`
-	GRPC         client.GRPCConfig      `yaml:"grpc"`
-	Logger       loggerhelper.LogConfig `yaml:"logger"`
+	PollInterval         time.Duration          `yaml:"poll_interval"`
+	PollJitter           time.Duration          `yaml:"poll_jitter"`
+	Metadata             metadata.Config        `yaml:"metadata"`
+	GRPC                 client.GRPCConfig      `yaml:"grpc"`
+	Logger               loggerhelper.LogConfig `yaml:"logger"`
+	UpdateRepoScriptPath string                 `yaml:"update_repo_script_path"`
 }
 
 func GetDefaultConfig() *Config {
 	return &Config{
-		PollInterval: time.Minute,
-		PollJitter:   30 * time.Second,
+		UpdateRepoScriptPath: "/usr/sbin/nebius-update-repo.sh",
+		PollInterval:         time.Minute,
+		PollJitter:           30 * time.Second,
 		Metadata: metadata.Config{
 			Path:               "/mnt/cloud-metadata",
 			ParentIdFilename:   "parent-id",

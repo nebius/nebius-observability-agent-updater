@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"google.golang.org/grpc/codes"
@@ -114,7 +115,7 @@ func (m *mockAgentData) IsAgentHealthy() (bool, []string) {
 	return args.Bool(0), args.Get(1).([]string)
 }
 
-func (m *mockAgentData) Update(string) error {
+func (m *mockAgentData) Update(string, string) error {
 	args := m.Called()
 	return args.Error(0)
 }
@@ -123,6 +124,10 @@ func (m *mockAgentData) Restart() error {
 	return args.Error(0)
 }
 
+func (m *mockAgentData) GetLastUpdateError() error {
+	args := m.Called()
+	return args.Error(0)
+}
 func TestNew(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
@@ -175,6 +180,7 @@ func TestSendAgentData(t *testing.T) {
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("GetLastUpdateError").Return(nil)
 
 	response, err := client.SendAgentData(agentData)
 
@@ -214,6 +220,7 @@ func TestFillRequest(t *testing.T) {
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("GetLastUpdateError").Return(fmt.Errorf("some-error"))
 
 	req := client.fillRequest(agentData)
 
@@ -230,6 +237,7 @@ func TestFillRequest(t *testing.T) {
 	assert.Equal(t, durationpb.New(10*time.Minute), req.AgentUptime)
 	assert.Equal(t, durationpb.New(10*time.Minute), req.UpdaterUptime)
 	assert.Equal(t, durationpb.New(1*time.Hour), req.SystemUptime)
+	assert.Equal(t, "some-error", req.LastUpdateError)
 
 	// Verify mock expectations
 	metadata.AssertExpectations(t)
@@ -284,6 +292,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("GetLastUpdateError").Return(nil)
 
 	response, err := client.SendAgentData(agentData)
 
@@ -341,6 +350,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("GetLastUpdateError").Return(nil)
 
 	response, err := client.SendAgentData(agentData)
 
@@ -374,6 +384,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("GetLastUpdateError").Return(nil)
 
 	// Set up mock expectations
 	oh.On("GetDebVersion", "test-agent-package").Return("", osutils.ErrDebNotFound)

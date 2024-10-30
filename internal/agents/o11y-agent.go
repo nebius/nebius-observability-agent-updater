@@ -3,13 +3,18 @@ package agents
 import (
 	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
 	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
+	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 )
 
 type O11yagent struct {
+	lastUpdateError error
+	oh              *osutils.OsHelper
 }
 
 func NewO11yagent() *O11yagent {
-	return &O11yagent{}
+	return &O11yagent{
+		oh: osutils.NewOsHelper(),
+	}
 }
 
 var _ AgentData = (*O11yagent)(nil)
@@ -38,8 +43,24 @@ func (o *O11yagent) IsAgentHealthy() (isHealthy bool, messages []string) {
 	return healthcheck.CheckHealthWithReasons(o.GetHealthCheckUrl())
 }
 
-func (o *O11yagent) Update(_ string) error {
+func (o *O11yagent) Update(updateRepoScriptPath string, version string) error {
+	err := o.oh.UpdateRepo(updateRepoScriptPath)
+	if err != nil {
+		o.lastUpdateError = err
+		return err
+	}
+
+	err = o.oh.InstallPackage(o.GetDebPackageName(), version)
+	if err != nil {
+		o.lastUpdateError = err
+		return err
+	}
+	o.lastUpdateError = nil
 	return nil
+}
+
+func (o *O11yagent) GetLastUpdateError() error {
+	return o.lastUpdateError
 }
 
 func (o *O11yagent) Restart() error {

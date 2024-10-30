@@ -22,7 +22,6 @@ var ErrDebNotFound = fmt.Errorf("package not found")
 
 func (o OsHelper) GetDebVersion(name string) (string, error) {
 	cmd := exec.Command("dpkg-query", "-W", "-f=${Version}", name)
-	fmt.Printf("Running command: %v\n", cmd.String())
 	output, err := cmd.Output()
 
 	if err != nil {
@@ -111,4 +110,22 @@ func (o OsHelper) GetArch() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func (o OsHelper) InstallPackage(packageName string, version string) error {
+	cmd := exec.Command("apt-get", "install", "-y", packageName+"="+version)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to install package %s=%s: %w: %s", packageName, version, err, output)
+	}
+	return nil
+}
+
+func (o OsHelper) UpdateRepo(scriptPath string) error {
+	cmd := exec.Command(scriptPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to update repo: %w: %s", err, output)
+	}
+	return nil
 }
