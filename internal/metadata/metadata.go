@@ -1,8 +1,10 @@
 package metadata
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -27,7 +29,12 @@ func (r *Reader) GetParentId() (string, error) {
 }
 
 func (r *Reader) GetInstanceId() (string, error) {
-	return r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
+	cmd := exec.Command("cloud-init", "query", "instance-id")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to call cloud-init query instance-id: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func (r *Reader) GetIamToken() (string, error) {
