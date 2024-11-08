@@ -257,6 +257,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 		config: &GRPCConfig{
 			Timeout: 5 * time.Second,
 			Retry: RetryConfig{
+				Enabled:        true,
 				MaxElapsedTime: 15 * time.Second,
 			},
 		},
@@ -321,6 +322,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 		config: &GRPCConfig{
 			Timeout: 5 * time.Second,
 			Retry: RetryConfig{
+				Enabled:             true,
 				MaxElapsedTime:      15 * time.Second,
 				InitialInterval:     1 * time.Second,
 				Multiplier:          2,
