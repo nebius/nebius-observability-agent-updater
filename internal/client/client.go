@@ -70,6 +70,7 @@ func GetDefaultGrpcConfig() GRPCConfig {
 }
 
 type RetryConfig struct {
+	Enabled             bool          `yaml:"enabled"`
 	MaxElapsedTime      time.Duration `yaml:"max_elapsed_time"`
 	InitialInterval     time.Duration `yaml:"initial_interval"`
 	Multiplier          float64       `yaml:"multiplier"`
@@ -78,6 +79,7 @@ type RetryConfig struct {
 
 func GetDefaultRetryConfig() RetryConfig {
 	return RetryConfig{
+		Enabled:             false,
 		MaxElapsedTime:      time.Second * 30,
 		InitialInterval:     time.Second,
 		Multiplier:          1.5,
@@ -173,16 +175,23 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionRes
 		}
 		r, err := s.client.GetVersion(ctx, req)
 		if err != nil {
-			s.logger.Warn("gRPC call failed, retrying", "error", err)
+			s.logger.Warn("gRPC call failed", "error", err)
 			return err
 		}
 		response = r
 		return nil
 	}
-	err := backoff.Retry(operation, s.retryBackoff)
-	s.retryBackoff.Reset()
-	if err != nil {
-		return nil, fmt.Errorf("all retries failed: %w", err)
+	if s.config.Retry.Enabled {
+		err := backoff.Retry(operation, s.retryBackoff)
+		s.retryBackoff.Reset()
+		if err != nil {
+			return nil, fmt.Errorf("all retries failed: %w", err)
+		}
+	} else {
+		err := operation()
+		if err != nil {
+			return nil, fmt.Errorf("failed to send agent data: %w", err)
+		}
 	}
 
 	s.logger.Debug("Received response", "action", response.Action)
