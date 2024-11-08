@@ -113,7 +113,7 @@ func (o OsHelper) GetArch() (string, error) {
 }
 
 func (o OsHelper) InstallPackage(packageName string, version string) error {
-	cmd := exec.Command("apt-get", "install", "-y", packageName+"="+version)
+	cmd := exec.Command("apt-get", "install", "--allow-downgrades", "-y", packageName+"="+version)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to install package %s=%s: %w: %s", packageName, version, err, output)
