@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
+	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,6 +78,11 @@ func (m *mockOSHelper) GetArch() (string, error) {
 	return args.String(0), args.Error(1)
 }
 
+func (m *mockOSHelper) GetMk8sClusterId(string) string {
+	args := m.Called()
+	return args.String(0)
+}
+
 type mockVersionServiceClient struct {
 	mock.Mock
 }
@@ -131,13 +138,15 @@ func (m *mockAgentData) GetLastUpdateError() error {
 func TestNew(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
-	config := &GRPCConfig{
-		Endpoint: "localhost:50051",
-		Insecure: true,
-		Timeout:  5 * time.Second,
+	cfg := config.Config{
+		GRPC: clientconfig.GRPCConfig{
+			Endpoint: "localhost:50051",
+			Insecure: true,
+			Timeout:  5 * time.Second,
+		},
 	}
 
-	client, err := New(metadata, oh, config, nil, tokenFunc)
+	client, err := New(metadata, oh, &cfg, nil, tokenFunc)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.conn)
@@ -153,9 +162,11 @@ func TestSendAgentData(t *testing.T) {
 		metadata:     metadata,
 		oh:           oh,
 		client:       mockClient,
-		retryBackoff: getRetryBackoff(GetDefaultRetryConfig()),
-		config: &GRPCConfig{
-			Timeout: 5 * time.Second,
+		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
+		config: &config.Config{
+			GRPC: clientconfig.GRPCConfig{
+				Timeout: 5 * time.Second,
+			},
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -169,6 +180,7 @@ func TestSendAgentData(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
+	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
 	expectedResponse := &generated.GetVersionResponse{
 		Action: generated.Action_NOP,
@@ -201,8 +213,9 @@ func TestFillRequest(t *testing.T) {
 	client := &Client{
 		metadata:     metadata,
 		oh:           oh,
-		retryBackoff: getRetryBackoff(GetDefaultRetryConfig()),
+		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		config:       &config.Config{},
 	}
 
 	// Set up mock expectations
@@ -214,6 +227,7 @@ func TestFillRequest(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
+	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
@@ -254,17 +268,19 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 		metadata: metadata,
 		oh:       oh,
 		client:   mockClient,
-		config: &GRPCConfig{
-			Timeout: 5 * time.Second,
-			Retry: RetryConfig{
-				Enabled:        true,
-				MaxElapsedTime: 15 * time.Second,
+		config: &config.Config{
+			GRPC: clientconfig.GRPCConfig{
+				Timeout: 5 * time.Second,
+				Retry: clientconfig.RetryConfig{
+					Enabled:        true,
+					MaxElapsedTime: 15 * time.Second,
+				},
 			},
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
-	client.retryBackoff = getRetryBackoff(client.config.Retry)
+	client.retryBackoff = getRetryBackoff(client.config.GRPC.Retry)
 
 	// Set up mock expectations
 	metadata.On("GetParentId").Return("parent-123", nil)
@@ -275,6 +291,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
+	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
 	expectedResponse := &generated.GetVersionResponse{
 		Action: generated.Action_NOP,
@@ -319,19 +336,21 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 		metadata: metadata,
 		oh:       oh,
 		client:   mockClient,
-		config: &GRPCConfig{
-			Timeout: 5 * time.Second,
-			Retry: RetryConfig{
-				Enabled:             true,
-				MaxElapsedTime:      15 * time.Second,
-				InitialInterval:     1 * time.Second,
-				Multiplier:          2,
-				RandomizationFactor: 0,
+		config: &config.Config{
+			GRPC: clientconfig.GRPCConfig{
+				Timeout: 5 * time.Second,
+				Retry: clientconfig.RetryConfig{
+					Enabled:             true,
+					MaxElapsedTime:      15 * time.Second,
+					InitialInterval:     1 * time.Second,
+					Multiplier:          2,
+					RandomizationFactor: 0,
+				},
 			},
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
-	client.retryBackoff = getRetryBackoff(client.config.Retry)
+	client.retryBackoff = getRetryBackoff(client.config.GRPC.Retry)
 
 	// Set up mock expectations (same as in the previous test)
 	metadata.On("GetParentId").Return("parent-123", nil)
@@ -342,6 +361,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
+	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
 	// Simulate continuous failures
 	mockClient.On("GetVersion", mock.Anything, mock.Anything, mock.Anything).
@@ -378,7 +398,8 @@ func TestFillRequestDebNotFound(t *testing.T) {
 		metadata:     metadata,
 		oh:           oh,
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		retryBackoff: getRetryBackoff(GetDefaultRetryConfig()),
+		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
+		config:       &config.Config{},
 	}
 
 	agentData := &mockAgentData{}
@@ -398,6 +419,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
 	req := client.fillRequest(agentData)
 

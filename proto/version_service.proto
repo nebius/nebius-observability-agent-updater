@@ -31,6 +31,7 @@ message GetVersionRequest {
   google.protobuf.Duration updater_uptime = 10;
   repeated string agent_state_messages = 11;
   string last_update_error= 12;
+  string mk8s_cluster_id = 13;
 }
 
 

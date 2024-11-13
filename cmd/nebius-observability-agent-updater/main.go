@@ -32,7 +32,7 @@ func main() {
 	logger := loggerhelper.InitLogger(&cfg.Logger)
 	metadataReader := metadata.NewReader(cfg.Metadata, logger)
 	oh := osutils.NewOsHelper()
-	cli, err := client.New(metadataReader, oh, &cfg.GRPC, logger, metadataReader.GetIamToken)
+	cli, err := client.New(metadataReader, oh, cfg, logger, metadataReader.GetIamToken)
 	if err != nil {
 		logger.Error("failed to create client", "error", err)
 		defer syscall.Exit(1)

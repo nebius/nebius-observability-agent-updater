@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/process"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -128,4 +129,12 @@ func (o OsHelper) UpdateRepo(scriptPath string) error {
 		return fmt.Errorf("failed to update repo: %w: %s", err, output)
 	}
 	return nil
+}
+
+func (o OsHelper) GetMk8sClusterId(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(content))
 }
