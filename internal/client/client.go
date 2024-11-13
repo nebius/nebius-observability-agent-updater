@@ -12,7 +12,6 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -113,13 +112,10 @@ func New(metadata metadataReader, oh oshelper, config *GRPCConfig, logger *slog.
 		config.Endpoint = endpoint
 	}
 	var dialOptions []grpc.DialOption
-	if config.Insecure {
-		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		creds := credentials.NewTLS(&tls.Config{})
-		// FIXME fill from config
-		dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
-	}
+	creds := credentials.NewTLS(&tls.Config{})
+	// FIXME fill from config
+	dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
+
 	dialOptions = append(dialOptions, grpc.WithKeepaliveParams(keepalive.ClientParameters{
 		Time:                config.KeepAlive.Time,
 		Timeout:             config.KeepAlive.Timeout,
