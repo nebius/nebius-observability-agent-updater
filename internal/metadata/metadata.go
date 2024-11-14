@@ -9,10 +9,11 @@ import (
 )
 
 type Config struct {
-	Path               string `yaml:"path"`
-	ParentIdFilename   string `yaml:"parent_id_filename"`
-	InstanceIdFilename string `yaml:"instance_id_filename"`
-	IamTokenFilename   string `yaml:"iam_token_filename"`
+	Path                  string `yaml:"path"`
+	ParentIdFilename      string `yaml:"parent_id_filename"`
+	InstanceIdFilename    string `yaml:"instance_id_filename"`
+	IamTokenFilename      string `yaml:"iam_token_filename"`
+	Mk8sClusterIdFilename string `yaml:"mk8s_cluster_id_filename"`
 }
 
 type Reader struct {
