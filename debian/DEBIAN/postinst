@@ -6,4 +6,4 @@ systemctl restart nebius_observability_agent_updater.service
 
 mkdir -p /var/lib/nebius-observability-agent-updater
 
-chmod 0644 /etc/nebius-observability-agent-updater/config.yaml
+chmod 0640 /etc/nebius-observability-agent-updater/config.yaml
