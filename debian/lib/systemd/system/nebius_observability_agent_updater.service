@@ -5,6 +5,7 @@ After=network.target
 [Service]
 ExecStart=/usr/sbin/nebius-observability-agent-updater-run.sh
 Restart=always
+RestartSec=5
 User=root
 
 [Install]
