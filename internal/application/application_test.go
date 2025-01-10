@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	"errors"
-	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"io"
 	"testing"
 	"time"
@@ -20,9 +20,9 @@ type MockUpdaterClient struct {
 	mock.Mock
 }
 
-func (m *MockUpdaterClient) SendAgentData(agent agents.AgentData) (*generated.GetVersionResponse, error) {
+func (m *MockUpdaterClient) SendAgentData(agent agents.AgentData) (*agentmanager.GetVersionResponse, error) {
 	args := m.Called(agent)
-	return args.Get(0).(*generated.GetVersionResponse), args.Error(1)
+	return args.Get(0).(*agentmanager.GetVersionResponse), args.Error(1)
 }
 
 func (m *MockUpdaterClient) Close() {
@@ -43,8 +43,8 @@ func (m *MockAgentData) Update(updateScriptPath string, version string) error {
 	return args.Error(0)
 }
 
-func (m *MockAgentData) GetAgentType() generated.AgentType {
-	return generated.AgentType_O11Y_AGENT
+func (m *MockAgentData) GetAgentType() agentmanager.AgentType {
+	return agentmanager.AgentType_O11Y_AGENT
 }
 
 func (m *MockAgentData) GetDebPackageName() string {
@@ -93,7 +93,7 @@ func TestApp_poll(t *testing.T) {
 		{
 			name: "Successful poll with no update",
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
-				client.On("SendAgentData", mock.Anything).Return(&generated.GetVersionResponse{Action: generated.Action_NOP}, nil)
+				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 				agent.On("GetServiceName").Return("test-agent")
 			},
 			expectedLogMsg: "Polling for ",
@@ -101,9 +101,9 @@ func TestApp_poll(t *testing.T) {
 		{
 			name: "Successful poll with update",
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
-				client.On("SendAgentData", mock.Anything).Return(&generated.GetVersionResponse{
-					Action:   generated.Action_UPDATE,
-					Response: &generated.GetVersionResponse_Update{Update: &generated.UpdateActionParams{Version: "1.0.1"}},
+				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
+					Action:   agentmanager.Action_UPDATE,
+					Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
 				agent.On("Update", "1.0.1").Return(nil)
@@ -113,8 +113,8 @@ func TestApp_poll(t *testing.T) {
 		{
 			name: "Successful poll with restart",
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
-				client.On("SendAgentData", mock.Anything).Return(&generated.GetVersionResponse{
-					Action: generated.Action_RESTART,
+				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
+					Action: agentmanager.Action_RESTART,
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
 				agent.On("Restart").Return(nil)
@@ -124,7 +124,7 @@ func TestApp_poll(t *testing.T) {
 		{
 			name: "Failed to send agent data",
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
-				client.On("SendAgentData", mock.Anything).Return((*generated.GetVersionResponse)(nil), errors.New("network error"))
+				client.On("SendAgentData", mock.Anything).Return((*agentmanager.GetVersionResponse)(nil), errors.New("network error"))
 				agent.On("GetServiceName").Return("test-agent")
 			},
 			expectedLogMsg: "Failed to send agent data",
@@ -164,7 +164,7 @@ func TestApp_Run(t *testing.T) {
 	agent := &MockAgentData{}
 
 	agent.On("GetServiceName").Return("test-agent")
-	client.On("SendAgentData", mock.Anything).Return(&generated.GetVersionResponse{Action: generated.Action_NOP}, nil)
+	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 
 	app := New(cfg, client, logger, []agents.AgentData{agent})
 

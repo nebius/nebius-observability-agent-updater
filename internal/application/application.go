@@ -2,7 +2,7 @@ package application
 
 import (
 	"context"
-	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"log/slog"
@@ -19,7 +19,7 @@ type App struct {
 }
 
 type updaterClient interface {
-	SendAgentData(agent agents.AgentData) (*generated.GetVersionResponse, error)
+	SendAgentData(agent agents.AgentData) (*agentmanager.GetVersionResponse, error)
 	Close()
 }
 
@@ -36,7 +36,7 @@ func (s *App) poll(agent agents.AgentData) {
 		return
 	}
 	s.logger.Debug("Received response", "response", response, "agent", agent.GetServiceName())
-	if response.Action == generated.Action_UPDATE {
+	if response.Action == agentmanager.Action_UPDATE {
 		updateData := response.GetUpdate()
 		if updateData == nil {
 			s.logger.Error("Received empty update data")
@@ -49,7 +49,7 @@ func (s *App) poll(agent agents.AgentData) {
 			return
 		}
 	}
-	if response.Action == generated.Action_RESTART {
+	if response.Action == agentmanager.Action_RESTART {
 		s.logger.Info("Restarting agent after service command", "agent", agent.GetServiceName())
 		err := agent.Restart()
 		if err != nil {

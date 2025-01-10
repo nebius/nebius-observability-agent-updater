@@ -1,9 +1,9 @@
 package agents
 
-import generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+import "github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 
 type AgentData interface {
-	GetAgentType() generated.AgentType
+	GetAgentType() agentmanager.AgentType
 	GetDebPackageName() string
 	GetServiceName() string
 	IsAgentHealthy() (bool, []string)
