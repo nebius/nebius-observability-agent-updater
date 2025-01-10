@@ -1,7 +1,7 @@
 package agents
 
 import (
-	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 )
@@ -23,8 +23,8 @@ func (o *O11yagent) GetServiceName() string {
 	return "nebius_observability_agent"
 }
 
-func (o *O11yagent) GetAgentType() generated.AgentType {
-	return generated.AgentType_O11Y_AGENT
+func (o *O11yagent) GetAgentType() agentmanager.AgentType {
+	return agentmanager.AgentType_O11Y_AGENT
 }
 
 func (o *O11yagent) GetDebPackageName() string {
