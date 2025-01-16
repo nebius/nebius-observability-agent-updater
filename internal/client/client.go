@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cenkalti/backoff/v4"
-	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"github.com/nebius/nebius-observability-agent-updater/internal/constants"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -47,7 +48,7 @@ type Client struct {
 	metadata         metadataReader
 	config           *config.Config
 	conn             *grpc.ClientConn
-	client           generated.VersionServiceClient
+	client           agentmanager.VersionServiceClient
 	logger           *slog.Logger
 	oh               oshelper
 	retryBackoff     backoff.BackOff
@@ -79,7 +80,7 @@ func New(metadata metadataReader, oh oshelper, config *config.Config, logger *sl
 	if err != nil {
 		return nil, fmt.Errorf("failed to create grpc client to %s: %w", config.GRPC.Endpoint, err)
 	}
-	client := generated.NewVersionServiceClient(conn)
+	client := agentmanager.NewVersionServiceClient(conn)
 
 	return &Client{
 		metadata:         metadata,
@@ -108,10 +109,10 @@ func (s *Client) Close() {
 	}
 }
 
-func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionResponse, error) {
+func (s *Client) SendAgentData(agent agents.AgentData) (*agentmanager.GetVersionResponse, error) {
 	s.logger.Debug("Sending agent data", "agent", agent.GetServiceName())
 	req := s.fillRequest(agent)
-	var response *generated.GetVersionResponse
+	var response *agentmanager.GetVersionResponse
 	operation := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.GRPC.Timeout)
 		defer cancel()
@@ -148,8 +149,8 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*generated.GetVersionRes
 	return response, nil
 }
 
-func (s *Client) fillRequest(agent agents.AgentData) *generated.GetVersionRequest {
-	req := generated.GetVersionRequest{}
+func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
+	req := agentmanager.GetVersionRequest{}
 	req.Type = agent.GetAgentType()
 
 	agentVersion, err := s.oh.GetDebVersion(agent.GetDebPackageName())
@@ -187,7 +188,7 @@ func (s *Client) fillRequest(agent agents.AgentData) *generated.GetVersionReques
 	} else {
 		req.InstanceId = instanceId
 	}
-	osinfo := generated.OSInfo{}
+	osinfo := agentmanager.OSInfo{}
 	osName, err := s.oh.GetOsName()
 	if err != nil {
 		s.logger.Error("failed to get os name", "error", err)
@@ -212,9 +213,9 @@ func (s *Client) fillRequest(agent agents.AgentData) *generated.GetVersionReques
 	req.OsInfo = &osinfo
 	healthy, reasons := agent.IsAgentHealthy()
 	if healthy {
-		req.AgentState = generated.AgentState_STATE_HEALTHY
+		req.AgentState = agentmanager.AgentState_STATE_HEALTHY
 	} else {
-		req.AgentState = generated.AgentState_STATE_ERROR
+		req.AgentState = agentmanager.AgentState_STATE_ERROR
 	}
 	req.AgentStateMessages = reasons
 
