@@ -40,6 +40,7 @@ type oshelper interface {
 
 const (
 	ENDPOINT_ENV = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
+	UserAgent    = "nebius-observability-agent-updater"
 )
 
 type Client struct {
@@ -71,6 +72,9 @@ func New(metadata metadataReader, oh oshelper, config *config.Config, logger *sl
 		Timeout:             config.GRPC.KeepAlive.Timeout,
 		PermitWithoutStream: config.GRPC.KeepAlive.PermitWithoutStream,
 	}))
+
+	dialOptions = append(dialOptions, grpc.WithUserAgent(UserAgent))
+
 	conn, err := grpc.NewClient("dns:///"+config.GRPC.Endpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create grpc client to %s: %w", config.GRPC.Endpoint, err)
