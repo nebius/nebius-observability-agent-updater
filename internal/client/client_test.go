@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
-	generated "github.com/nebius/nebius-observability-agent-updater/generated/proto"
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
@@ -87,7 +87,7 @@ type mockVersionServiceClient struct {
 	mock.Mock
 }
 
-func (m *mockVersionServiceClient) GetVersion(ctx context.Context, req *generated.GetVersionRequest, opts ...grpc.CallOption) (*generated.GetVersionResponse, error) {
+func (m *mockVersionServiceClient) GetVersion(ctx context.Context, req *agentmanager.GetVersionRequest, opts ...grpc.CallOption) (*agentmanager.GetVersionResponse, error) {
 	args := m.Called(ctx, req, opts)
 
 	// Handle the case where a nil response is returned
@@ -95,7 +95,7 @@ func (m *mockVersionServiceClient) GetVersion(ctx context.Context, req *generate
 		return nil, args.Error(1)
 	}
 
-	return args.Get(0).(*generated.GetVersionResponse), args.Error(1)
+	return args.Get(0).(*agentmanager.GetVersionResponse), args.Error(1)
 }
 
 // New mock for agents.AgentData
@@ -103,9 +103,9 @@ type mockAgentData struct {
 	mock.Mock
 }
 
-func (m *mockAgentData) GetAgentType() generated.AgentType {
+func (m *mockAgentData) GetAgentType() agentmanager.AgentType {
 	args := m.Called()
-	return args.Get(0).(generated.AgentType)
+	return args.Get(0).(agentmanager.AgentType)
 }
 
 func (m *mockAgentData) GetDebPackageName() string {
@@ -182,15 +182,15 @@ func TestSendAgentData(t *testing.T) {
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
-	expectedResponse := &generated.GetVersionResponse{
-		Action: generated.Action_NOP,
+	expectedResponse := &agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
 	}
 	mockClient.On("GetVersion", mock.Anything, mock.Anything, mock.Anything).Return(expectedResponse, nil)
 
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
-	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -232,14 +232,14 @@ func TestFillRequest(t *testing.T) {
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
-	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
 	agentData.On("GetLastUpdateError").Return(fmt.Errorf("some-error"))
 
 	req := client.fillRequest(agentData)
 
 	assert.NotNil(t, req)
-	assert.Equal(t, generated.AgentType_O11Y_AGENT, req.Type)
+	assert.Equal(t, agentmanager.AgentType_O11Y_AGENT, req.Type)
 	assert.Equal(t, "1.0.0", req.AgentVersion)
 	assert.Equal(t, "1.0.0", req.UpdaterVersion)
 	assert.Equal(t, "parent-123", req.ParentId)
@@ -247,7 +247,7 @@ func TestFillRequest(t *testing.T) {
 	assert.Equal(t, "Linux", req.OsInfo.Name)
 	assert.Equal(t, "Linux 5.4.0-generic", req.OsInfo.Uname)
 	assert.Equal(t, "x86_64", req.OsInfo.Architecture)
-	assert.Equal(t, generated.AgentState_STATE_HEALTHY, req.AgentState)
+	assert.Equal(t, agentmanager.AgentState_STATE_HEALTHY, req.AgentState)
 	assert.Equal(t, durationpb.New(10*time.Minute), req.AgentUptime)
 	assert.Equal(t, durationpb.New(10*time.Minute), req.UpdaterUptime)
 	assert.Equal(t, durationpb.New(1*time.Hour), req.SystemUptime)
@@ -293,8 +293,8 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
-	expectedResponse := &generated.GetVersionResponse{
-		Action: generated.Action_NOP,
+	expectedResponse := &agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
 	}
 
 	// Simulate two failures followed by a success
@@ -308,7 +308,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
-	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -370,7 +370,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
-	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -405,7 +405,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
-	agentData.On("GetAgentType").Return(generated.AgentType_O11Y_AGENT)
+	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
 	agentData.On("IsAgentHealthy").Return(true, []string{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
