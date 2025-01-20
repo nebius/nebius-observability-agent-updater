@@ -1,4 +1,4 @@
-.PHONY: all clean
+.PHONY: all 
 
 # Default target
 all: build-deb
