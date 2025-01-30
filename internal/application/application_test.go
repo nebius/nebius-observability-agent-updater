@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
+	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"io"
 	"testing"
 	"time"
@@ -57,8 +58,8 @@ func (m *MockAgentData) GetHealthCheckUrl() string {
 func (m *MockAgentData) GetSystemdServiceName() string {
 	return "nebius-observability-agent"
 }
-func (m *MockAgentData) IsAgentHealthy() (bool, []string) {
-	return true, nil
+func (m *MockAgentData) IsAgentHealthy() (bool, healthcheck.Response) {
+	return true, healthcheck.Response{}
 }
 
 func (m *MockAgentData) GetLastUpdateError() error {

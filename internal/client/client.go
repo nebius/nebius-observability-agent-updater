@@ -149,6 +149,7 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*agentmanager.GetVersion
 	return response, nil
 }
 
+// nolint: gocognit
 func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
 	req := agentmanager.GetVersionRequest{}
 	req.Type = agent.GetAgentType()
@@ -211,13 +212,46 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	}
 
 	req.OsInfo = &osinfo
-	healthy, reasons := agent.IsAgentHealthy()
+	healthy, response := agent.IsAgentHealthy()
 	if healthy {
 		req.AgentState = agentmanager.AgentState_STATE_HEALTHY
 	} else {
 		req.AgentState = agentmanager.AgentState_STATE_ERROR
 	}
-	req.AgentStateMessages = reasons
+	req.AgentStateMessages = response.Reasons
+	req.ModulesHealth = &agentmanager.ModulesHealth{}
+	if processHealth, found := response.CheckStatuses["process"]; found {
+		state := agentmanager.AgentState_STATE_HEALTHY
+		if !processHealth.IsOk {
+			state = agentmanager.AgentState_STATE_ERROR
+		}
+		req.ModulesHealth.Process = &agentmanager.ModuleHealth{
+			State:    state,
+			Messages: processHealth.Reasons,
+		}
+	}
+
+	if cpuHealth, found := response.CheckStatuses["cpu"]; found {
+		state := agentmanager.AgentState_STATE_HEALTHY
+		if !cpuHealth.IsOk {
+			state = agentmanager.AgentState_STATE_ERROR
+		}
+		req.ModulesHealth.CpuPipeline = &agentmanager.ModuleHealth{
+			State:    state,
+			Messages: cpuHealth.Reasons,
+		}
+	}
+
+	if gpuHealth, found := response.CheckStatuses["gpu"]; found {
+		state := agentmanager.AgentState_STATE_HEALTHY
+		if !gpuHealth.IsOk {
+			state = agentmanager.AgentState_STATE_ERROR
+		}
+		req.ModulesHealth.GpuPipeline = &agentmanager.ModuleHealth{
+			State:    state,
+			Messages: gpuHealth.Reasons,
+		}
+	}
 
 	agentUptime, err := s.oh.GetServiceUptime(agent.GetServiceName())
 	if err != nil {
