@@ -40,8 +40,11 @@ type oshelper interface {
 }
 
 const (
-	ENDPOINT_ENV = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
-	UserAgent    = "nebius-observability-agent-updater"
+	ENDPOINT_ENV     = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
+	UserAgent        = "nebius-observability-agent-updater"
+	ProcessHealthKey = "process"
+	CpuHealthKey     = "cpu"
+	GpuHealthKey     = "gpu"
 )
 
 type Client struct {
@@ -220,7 +223,7 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	}
 	req.AgentStateMessages = response.Reasons
 	req.ModulesHealth = &agentmanager.ModulesHealth{}
-	if processHealth, found := response.CheckStatuses["process"]; found {
+	if processHealth, found := response.CheckStatuses[ProcessHealthKey]; found {
 		state := agentmanager.AgentState_STATE_HEALTHY
 		if !processHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
@@ -231,7 +234,7 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		}
 	}
 
-	if cpuHealth, found := response.CheckStatuses["cpu"]; found {
+	if cpuHealth, found := response.CheckStatuses[CpuHealthKey]; found {
 		state := agentmanager.AgentState_STATE_HEALTHY
 		if !cpuHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
@@ -242,7 +245,7 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		}
 	}
 
-	if gpuHealth, found := response.CheckStatuses["gpu"]; found {
+	if gpuHealth, found := response.CheckStatuses[GpuHealthKey]; found {
 		state := agentmanager.AgentState_STATE_HEALTHY
 		if !gpuHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
