@@ -39,7 +39,7 @@ func (o *O11yagent) GetSystemdServiceName() string {
 	return "nebius-observability-agent"
 }
 
-func (o *O11yagent) IsAgentHealthy() (isHealthy bool, messages []string) {
+func (o *O11yagent) IsAgentHealthy() (isHealthy bool, response healthcheck.Response) {
 	return healthcheck.CheckHealthWithReasons(o.GetHealthCheckUrl())
 }
 

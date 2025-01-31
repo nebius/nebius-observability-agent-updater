@@ -6,6 +6,7 @@ import (
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
+	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -117,9 +118,9 @@ func (m *mockAgentData) GetServiceName() string {
 	args := m.Called()
 	return args.String(0)
 }
-func (m *mockAgentData) IsAgentHealthy() (bool, []string) {
+func (m *mockAgentData) IsAgentHealthy() (bool, healthcheck.Response) {
 	args := m.Called()
-	return args.Bool(0), args.Get(1).([]string)
+	return args.Bool(0), args.Get(1).(healthcheck.Response)
 }
 
 func (m *mockAgentData) Update(string, string) error {
@@ -191,7 +192,7 @@ func TestSendAgentData(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
 	response, err := client.SendAgentData(agentData)
@@ -206,6 +207,7 @@ func TestSendAgentData(t *testing.T) {
 	agentData.AssertExpectations(t)
 }
 
+// nolint: gocognit
 func TestFillRequest(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
@@ -227,13 +229,43 @@ func TestFillRequest(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId", mock.Anything).Return("abcd", nil)
+
+	// Create mock health check response using the correct structure
+	checkStatuses := map[string]healthcheck.CheckStatus{
+		"process": {
+			IsOk:    true,
+			Reasons: []string{"Process is running"},
+			Parameters: []healthcheck.Parameter{
+				{Name: "pid", Value: "1234"},
+			},
+		},
+		"cpu": {
+			IsOk:    true,
+			Reasons: []string{"CPU usage is normal"},
+			Parameters: []healthcheck.Parameter{
+				{Name: "usage", Value: "45%"},
+			},
+		},
+		"gpu": {
+			IsOk:    false,
+			Reasons: []string{"GPU driver not found"},
+		},
+	}
+
+	healthResponse := healthcheck.Response{
+		StatusMsg:     "healthy",
+		UpSince:       time.Now().Add(-10 * time.Minute),
+		Uptime:        "10m0s",
+		Reasons:       []string{"Agent is healthy"},
+		CheckStatuses: checkStatuses,
+	}
 
 	agentData := &mockAgentData{}
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("IsAgentHealthy").Return(true, healthResponse)
 	agentData.On("GetLastUpdateError").Return(fmt.Errorf("some-error"))
 
 	req := client.fillRequest(agentData)
@@ -248,10 +280,21 @@ func TestFillRequest(t *testing.T) {
 	assert.Equal(t, "Linux 5.4.0-generic", req.OsInfo.Uname)
 	assert.Equal(t, "x86_64", req.OsInfo.Architecture)
 	assert.Equal(t, agentmanager.AgentState_STATE_HEALTHY, req.AgentState)
+	assert.Equal(t, []string{"Agent is healthy"}, req.AgentStateMessages)
 	assert.Equal(t, durationpb.New(10*time.Minute), req.AgentUptime)
 	assert.Equal(t, durationpb.New(10*time.Minute), req.UpdaterUptime)
 	assert.Equal(t, durationpb.New(1*time.Hour), req.SystemUptime)
 	assert.Equal(t, "some-error", req.LastUpdateError)
+	assert.Equal(t, "abcd", req.Mk8SClusterId)
+
+	// Verify module health statuses
+	assert.NotNil(t, req.ModulesHealth)
+	assert.Equal(t, agentmanager.AgentState_STATE_HEALTHY, req.ModulesHealth.Process.State)
+	assert.Equal(t, []string{"Process is running"}, req.ModulesHealth.Process.Messages)
+	assert.Equal(t, agentmanager.AgentState_STATE_HEALTHY, req.ModulesHealth.CpuPipeline.State)
+	assert.Equal(t, []string{"CPU usage is normal"}, req.ModulesHealth.CpuPipeline.Messages)
+	assert.Equal(t, agentmanager.AgentState_STATE_ERROR, req.ModulesHealth.GpuPipeline.State)
+	assert.Equal(t, []string{"GPU driver not found"}, req.ModulesHealth.GpuPipeline.Messages)
 
 	// Verify mock expectations
 	metadata.AssertExpectations(t)
@@ -309,7 +352,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
 	response, err := client.SendAgentData(agentData)
@@ -371,7 +414,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
 	response, err := client.SendAgentData(agentData)
@@ -406,7 +449,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
-	agentData.On("IsAgentHealthy").Return(true, []string{})
+	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
 	// Set up mock expectations
