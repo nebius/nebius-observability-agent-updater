@@ -46,6 +46,17 @@ func (o OsHelper) getSystemdPid(serviceName string) (int32, error) {
 	return int32(pid), nil
 }
 
+func (o OsHelper) GetSystemdStatus(serviceName string) (string, error) {
+	cmd := exec.Command("systemctl", "is-active", serviceName)
+	output, err := cmd.Output()
+
+	if err != nil {
+		return "", fmt.Errorf("failed to get PID of %s: %w", serviceName, err)
+	}
+	result := strings.TrimSpace(string(output))
+	return result, nil
+}
+
 func (o OsHelper) GetServiceUptime(serviceName string) (time.Duration, error) {
 	pid, err := o.getSystemdPid(serviceName)
 	if err != nil {

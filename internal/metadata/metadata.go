@@ -29,13 +29,17 @@ func (r *Reader) GetParentId() (string, error) {
 	return r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.ParentIdFilename)
 }
 
-func (r *Reader) GetInstanceId() (string, error) {
+func (r *Reader) GetInstanceId() (instanceId string, isFallback bool, err error) {
 	cmd := exec.Command("cloud-init", "query", "instance-id")
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to call cloud-init query instance-id: %w", err)
+		instanceId, err2 := r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
+		if err2 != nil {
+			return "", true, fmt.Errorf("failed to call cloud-init query instance-id: %w and read from file: %w", err, err2)
+		}
+		return instanceId, true, nil
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSpace(string(output)), false, nil
 }
 
 func (r *Reader) GetIamToken() (string, error) {

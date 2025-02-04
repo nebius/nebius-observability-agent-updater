@@ -25,7 +25,7 @@ import (
 
 type metadataReader interface {
 	GetParentId() (string, error)
-	GetInstanceId() (string, error)
+	GetInstanceId() (string, bool, error)
 	GetIamToken() (string, error)
 }
 
@@ -33,6 +33,7 @@ type oshelper interface {
 	GetDebVersion(packageName string) (string, error)
 	GetServiceUptime(serviceName string) (time.Duration, error)
 	GetSystemUptime() (time.Duration, error)
+	GetSystemdStatus(serviceName string) (string, error)
 	GetOsName() (string, error)
 	GetUname() (string, error)
 	GetArch() (string, error)
@@ -186,12 +187,14 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		req.ParentId = parentId
 	}
 
-	instanceId, err := s.metadata.GetInstanceId()
+	instanceId, cloudInitFallback, err := s.metadata.GetInstanceId()
 	if err != nil {
 		s.logger.Error("failed to get instance id", "error", err)
 	} else {
 		req.InstanceId = instanceId
 	}
+
+	req.InstanceIdUsedFallback = cloudInitFallback
 	osinfo := agentmanager.OSInfo{}
 	osName, err := s.oh.GetOsName()
 	if err != nil {
@@ -228,9 +231,17 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		if !processHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
 		}
+		var params []*agentmanager.Parameter
+		for _, p := range processHealth.Parameters {
+			params = append(params, &agentmanager.Parameter{
+				Name:  p.Name,
+				Value: p.Value,
+			})
+		}
 		req.ModulesHealth.Process = &agentmanager.ModuleHealth{
-			State:    state,
-			Messages: processHealth.Reasons,
+			State:      state,
+			Messages:   processHealth.Reasons,
+			Parameters: params,
 		}
 	}
 
@@ -239,9 +250,17 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		if !cpuHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
 		}
+		var params []*agentmanager.Parameter
+		for _, p := range cpuHealth.Parameters {
+			params = append(params, &agentmanager.Parameter{
+				Name:  p.Name,
+				Value: p.Value,
+			})
+		}
 		req.ModulesHealth.CpuPipeline = &agentmanager.ModuleHealth{
-			State:    state,
-			Messages: cpuHealth.Reasons,
+			State:      state,
+			Messages:   cpuHealth.Reasons,
+			Parameters: params,
 		}
 	}
 
@@ -250,9 +269,17 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		if !gpuHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
 		}
+		var params []*agentmanager.Parameter
+		for _, p := range gpuHealth.Parameters {
+			params = append(params, &agentmanager.Parameter{
+				Name:  p.Name,
+				Value: p.Value,
+			})
+		}
 		req.ModulesHealth.GpuPipeline = &agentmanager.ModuleHealth{
-			State:    state,
-			Messages: gpuHealth.Reasons,
+			State:      state,
+			Messages:   gpuHealth.Reasons,
+			Parameters: params,
 		}
 	}
 
@@ -283,5 +310,12 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	}
 
 	req.Mk8SClusterId = s.oh.GetMk8sClusterId(s.config.Mk8sClusterIdPath)
+
+	cloudInitStatus, err := s.oh.GetSystemdStatus(constants.CloudInitServiceName)
+	if err != nil {
+		s.logger.Error("failed to get cloud-init status", "error", err)
+	} else {
+		req.CloudInitStatus = cloudInitStatus
+	}
 	return &req
 }
