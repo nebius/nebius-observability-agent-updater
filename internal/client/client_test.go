@@ -35,9 +35,9 @@ func (m *mockMetadataReader) GetParentId() (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *mockMetadataReader) GetInstanceId() (string, error) {
+func (m *mockMetadataReader) GetInstanceId() (string, bool, error) {
 	args := m.Called()
-	return args.String(0), args.Error(1)
+	return args.String(0), false, args.Error(1)
 }
 
 func (m *mockMetadataReader) GetIamToken() (string, error) {
@@ -82,6 +82,10 @@ func (m *mockOSHelper) GetArch() (string, error) {
 func (m *mockOSHelper) GetMk8sClusterId(string) string {
 	args := m.Called()
 	return args.String(0)
+}
+
+func (m *mockOSHelper) GetSystemdStatus(string) (string, error) {
+	return "active", nil
 }
 
 type mockVersionServiceClient struct {
