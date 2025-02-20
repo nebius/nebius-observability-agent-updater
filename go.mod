@@ -4,7 +4,7 @@ go 1.22.2
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/nebius/gosdk v0.0.0-20250204111340-ed820f5794d4
+	github.com/nebius/gosdk v0.0.0-20250219114623-bac7696d4cb8
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/goleak v1.3.0
