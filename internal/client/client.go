@@ -318,12 +318,13 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		req.CloudInitStatus = cloudInitStatus
 	}
-
-	lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
-	if err != nil {
-		s.logger.Error("failed to get last logs", "error", err)
-	} else {
-		req.LastAgentLogs = lastLogs
+	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY {
+		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
+		if err != nil {
+			s.logger.Error("failed to get last logs", "error", err)
+		} else {
+			req.LastAgentLogs = lastLogs
+		}
 	}
 
 	return &req
