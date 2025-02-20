@@ -245,10 +245,11 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 			Parameters: params,
 		}
 	}
-
+	cpuError := false
 	if cpuHealth, found := response.CheckStatuses[CpuHealthKey]; found {
 		state := agentmanager.AgentState_STATE_HEALTHY
 		if !cpuHealth.IsOk {
+			cpuError = true
 			state = agentmanager.AgentState_STATE_ERROR
 		}
 		var params []*agentmanager.Parameter
@@ -264,11 +265,12 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 			Parameters: params,
 		}
 	}
-
+	gpuError := false
 	if gpuHealth, found := response.CheckStatuses[GpuHealthKey]; found {
 		state := agentmanager.AgentState_STATE_HEALTHY
 		if !gpuHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
+			gpuError = true
 		}
 		var params []*agentmanager.Parameter
 		for _, p := range gpuHealth.Parameters {
@@ -281,6 +283,14 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 			State:      state,
 			Messages:   gpuHealth.Reasons,
 			Parameters: params,
+		}
+	}
+	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError {
+		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 20)
+		if err != nil {
+			s.logger.Error("failed to get last logs", "error", err)
+		} else {
+			req.LastAgentLogs = lastLogs
 		}
 	}
 
@@ -317,16 +327,6 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		s.logger.Error("failed to get cloud-init status", "error", err)
 	} else {
 		req.CloudInitStatus = cloudInitStatus
-	}
-	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY &&
-		req.ModulesHealth.CpuPipeline.State != agentmanager.AgentState_STATE_ERROR &&
-		req.ModulesHealth.GpuPipeline.State != agentmanager.AgentState_STATE_ERROR {
-		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 20)
-		if err != nil {
-			s.logger.Error("failed to get last logs", "error", err)
-		} else {
-			req.LastAgentLogs = lastLogs
-		}
 	}
 
 	return &req
