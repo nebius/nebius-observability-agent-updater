@@ -56,6 +56,15 @@ func (o OsHelper) GetSystemdStatus(serviceName string) (string, error) {
 	return result, nil
 }
 
+func (o OsHelper) GetLastLogs(serviceName string, lines int) (string, error) {
+	cmd := exec.Command("journalctl", "-u", serviceName, "--no-pager", fmt.Sprintf("--lines=%d", lines))
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get logs for %s: %w", serviceName, err)
+	}
+	return string(output), nil
+}
+
 func (o OsHelper) GetServiceUptime(serviceName string) (time.Duration, error) {
 	pid, err := o.getSystemdPid(serviceName)
 	if err != nil {

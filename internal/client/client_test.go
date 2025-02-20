@@ -88,6 +88,10 @@ func (m *mockOSHelper) GetSystemdStatus(string) (string, error) {
 	return "active", nil
 }
 
+func (m *mockOSHelper) GetLastLogs(string, int) (string, error) {
+	return "logs", nil
+}
+
 type mockVersionServiceClient struct {
 	mock.Mock
 }

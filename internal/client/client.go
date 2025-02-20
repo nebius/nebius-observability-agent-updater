@@ -38,6 +38,7 @@ type oshelper interface {
 	GetUname() (string, error)
 	GetArch() (string, error)
 	GetMk8sClusterId(path string) string
+	GetLastLogs(serviceName string, lines int) (string, error)
 }
 
 const (
@@ -317,5 +318,13 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		req.CloudInitStatus = cloudInitStatus
 	}
+
+	lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
+	if err != nil {
+		s.logger.Error("failed to get last logs", "error", err)
+	} else {
+		req.LastAgentLogs = lastLogs
+	}
+
 	return &req
 }
