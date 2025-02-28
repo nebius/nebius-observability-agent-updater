@@ -40,7 +40,7 @@ func (m *MockAgentData) GetServiceName() string {
 }
 
 func (m *MockAgentData) Update(updateScriptPath string, version string) error {
-	args := m.Called(version)
+	args := m.Called(updateScriptPath, version)
 	return args.Error(0)
 }
 
@@ -70,30 +70,43 @@ func (m *MockAgentData) Restart() error {
 	args := m.Called()
 	return args.Error(0)
 }
+
+// New mock for OSHelper
+type MockOSHelper struct {
+	mock.Mock
+}
+
+func (m *MockOSHelper) GetSystemUptime() (time.Duration, error) {
+	args := m.Called()
+	return args.Get(0).(time.Duration), args.Error(1)
+}
+
 func TestApp_New(t *testing.T) {
 	cfg := &config.Config{}
 	client := &MockUpdaterClient{}
 	logger := slog.Default()
 	agents := []agents.AgentData{&MockAgentData{}}
+	oh := &MockOSHelper{}
 
-	app := New(cfg, client, logger, agents)
+	app := New(cfg, client, logger, agents, oh)
 
 	assert.NotNil(t, app)
 	assert.Equal(t, cfg, app.config)
 	assert.Equal(t, client, app.client)
 	assert.Equal(t, logger, app.logger)
 	assert.Equal(t, agents, app.agents)
+	assert.Equal(t, oh, app.oh)
 }
 
 func TestApp_poll(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupMocks     func(*MockUpdaterClient, *MockAgentData)
+		setupMocks     func(*MockUpdaterClient, *MockAgentData, *MockOSHelper)
 		expectedLogMsg string
 	}{
 		{
 			name: "Successful poll with no update",
-			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
+			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 				agent.On("GetServiceName").Return("test-agent")
 			},
@@ -101,19 +114,20 @@ func TestApp_poll(t *testing.T) {
 		},
 		{
 			name: "Successful poll with update",
-			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
+			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
 					Action:   agentmanager.Action_UPDATE,
 					Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
-				agent.On("Update", "1.0.1").Return(nil)
+				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
+				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
 			},
 			expectedLogMsg: "Polling for ",
 		},
 		{
 			name: "Successful poll with restart",
-			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
+			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
 					Action: agentmanager.Action_RESTART,
 				}, nil)
@@ -124,7 +138,7 @@ func TestApp_poll(t *testing.T) {
 		},
 		{
 			name: "Failed to send agent data",
-			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData) {
+			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return((*agentmanager.GetVersionResponse)(nil), errors.New("network error"))
 				agent.On("GetServiceName").Return("test-agent")
 			},
@@ -136,18 +150,140 @@ func TestApp_poll(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &MockUpdaterClient{}
 			agent := &MockAgentData{}
-			tt.setupMocks(client, agent)
+			oh := &MockOSHelper{}
+			tt.setupMocks(client, agent, oh)
 
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			app := &App{
 				client: client,
 				logger: logger,
 				config: config.GetDefaultConfig(),
+				oh:     oh,
 			}
 
 			app.poll(agent)
 
 			client.AssertExpectations(t)
+			agent.AssertExpectations(t)
+			oh.AssertExpectations(t)
+		})
+	}
+}
+
+func TestApp_Update(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupMocks   func(*MockAgentData, *MockOSHelper)
+		response     *agentmanager.GetVersionResponse
+		shouldUpdate bool
+	}{
+		{
+			name: "Update with sufficient uptime",
+			setupMocks: func(agent *MockAgentData, oh *MockOSHelper) {
+				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
+				agent.On("GetServiceName").Return("test-agent")
+				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
+			},
+			response: &agentmanager.GetVersionResponse{
+				Action:   agentmanager.Action_UPDATE,
+				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+			},
+			shouldUpdate: true,
+		},
+		{
+			name: "Skip update with insufficient uptime",
+			setupMocks: func(agent *MockAgentData, oh *MockOSHelper) {
+				oh.On("GetSystemUptime").Return(10*time.Minute, nil)
+			},
+			response: &agentmanager.GetVersionResponse{
+				Action:   agentmanager.Action_UPDATE,
+				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+			},
+			shouldUpdate: false,
+		},
+		{
+			name: "Update with error getting uptime",
+			setupMocks: func(agent *MockAgentData, oh *MockOSHelper) {
+				oh.On("GetSystemUptime").Return(time.Duration(0), errors.New("uptime error"))
+				agent.On("GetServiceName").Return("test-agent")
+				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
+			},
+			response: &agentmanager.GetVersionResponse{
+				Action:   agentmanager.Action_UPDATE,
+				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+			},
+			shouldUpdate: true,
+		},
+		{
+			name: "Update with empty update data",
+			setupMocks: func(agent *MockAgentData, oh *MockOSHelper) {
+				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
+			},
+			response: &agentmanager.GetVersionResponse{
+				Action: agentmanager.Action_UPDATE,
+			},
+			shouldUpdate: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &MockAgentData{}
+			oh := &MockOSHelper{}
+			tt.setupMocks(agent, oh)
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			app := &App{
+				logger: logger,
+				config: config.GetDefaultConfig(),
+				oh:     oh,
+			}
+
+			app.Update(tt.response, agent)
+
+			agent.AssertExpectations(t)
+			oh.AssertExpectations(t)
+		})
+	}
+}
+
+func TestApp_Restart(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupMocks    func(*MockAgentData)
+		shouldRestart bool
+	}{
+		{
+			name: "Successful restart",
+			setupMocks: func(agent *MockAgentData) {
+				agent.On("GetServiceName").Return("test-agent")
+				agent.On("Restart").Return(nil)
+			},
+			shouldRestart: true,
+		},
+		{
+			name: "Failed restart",
+			setupMocks: func(agent *MockAgentData) {
+				agent.On("GetServiceName").Return("test-agent")
+				agent.On("Restart").Return(errors.New("restart error"))
+			},
+			shouldRestart: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &MockAgentData{}
+			tt.setupMocks(agent)
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			app := &App{
+				logger: logger,
+				config: config.GetDefaultConfig(),
+			}
+
+			app.Restart(agent)
+
 			agent.AssertExpectations(t)
 		})
 	}
@@ -163,11 +299,12 @@ func TestApp_Run(t *testing.T) {
 	client := &MockUpdaterClient{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agent := &MockAgentData{}
+	oh := &MockOSHelper{}
 
 	agent.On("GetServiceName").Return("test-agent")
 	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 
-	app := New(cfg, client, logger, []agents.AgentData{agent})
+	app := New(cfg, client, logger, []agents.AgentData{agent}, oh)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
