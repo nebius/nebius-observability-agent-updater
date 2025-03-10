@@ -39,7 +39,7 @@ func main() {
 		return
 	}
 	agentsList := []agents.AgentData{agents.NewO11yagent()}
-	app := application.New(cfg, cli, logger, agentsList)
+	app := application.New(cfg, cli, logger, agentsList, oh)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
