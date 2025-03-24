@@ -11,6 +11,7 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"github.com/nebius/nebius-observability-agent-updater/internal/constants"
+	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 
 	"google.golang.org/grpc"
@@ -47,6 +48,7 @@ const (
 	ProcessHealthKey = "process"
 	CpuHealthKey     = "cpu"
 	GpuHealthKey     = "gpu"
+	CiliumHealthKey  = "cilium"
 )
 
 type Client struct {
@@ -154,6 +156,29 @@ func (s *Client) SendAgentData(agent agents.AgentData) (*agentmanager.GetVersion
 	return response, nil
 }
 
+func (s *Client) processModuleHealth(healthKey string, statuses map[string]healthcheck.CheckStatus) (isError bool, moduleHealth *agentmanager.ModuleHealth) {
+	if health, found := statuses[healthKey]; found {
+		state := agentmanager.AgentState_STATE_HEALTHY
+		if !health.IsOk {
+			isError = true
+			state = agentmanager.AgentState_STATE_ERROR
+		}
+		var params []*agentmanager.Parameter
+		for _, p := range health.Parameters {
+			params = append(params, &agentmanager.Parameter{
+				Name:  p.Name,
+				Value: p.Value,
+			})
+		}
+		return isError, &agentmanager.ModuleHealth{
+			State:      state,
+			Messages:   health.Reasons,
+			Parameters: params,
+		}
+	}
+	return false, nil
+}
+
 // nolint: gocognit
 func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
 	req := agentmanager.GetVersionRequest{}
@@ -246,46 +271,13 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		}
 	}
 	cpuError := false
-	if cpuHealth, found := response.CheckStatuses[CpuHealthKey]; found {
-		state := agentmanager.AgentState_STATE_HEALTHY
-		if !cpuHealth.IsOk {
-			cpuError = true
-			state = agentmanager.AgentState_STATE_ERROR
-		}
-		var params []*agentmanager.Parameter
-		for _, p := range cpuHealth.Parameters {
-			params = append(params, &agentmanager.Parameter{
-				Name:  p.Name,
-				Value: p.Value,
-			})
-		}
-		req.ModulesHealth.CpuPipeline = &agentmanager.ModuleHealth{
-			State:      state,
-			Messages:   cpuHealth.Reasons,
-			Parameters: params,
-		}
-	}
+	cpuError, req.ModulesHealth.CpuPipeline = s.processModuleHealth(CpuHealthKey, response.CheckStatuses)
 	gpuError := false
-	if gpuHealth, found := response.CheckStatuses[GpuHealthKey]; found {
-		state := agentmanager.AgentState_STATE_HEALTHY
-		if !gpuHealth.IsOk {
-			state = agentmanager.AgentState_STATE_ERROR
-			gpuError = true
-		}
-		var params []*agentmanager.Parameter
-		for _, p := range gpuHealth.Parameters {
-			params = append(params, &agentmanager.Parameter{
-				Name:  p.Name,
-				Value: p.Value,
-			})
-		}
-		req.ModulesHealth.GpuPipeline = &agentmanager.ModuleHealth{
-			State:      state,
-			Messages:   gpuHealth.Reasons,
-			Parameters: params,
-		}
-	}
-	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError {
+	gpuError, req.ModulesHealth.GpuPipeline = s.processModuleHealth(GpuHealthKey, response.CheckStatuses)
+	ciliumError := false
+	ciliumError, req.ModulesHealth.CiliumPipeline = s.processModuleHealth(CiliumHealthKey, response.CheckStatuses)
+
+	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError {
 		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
 		if err != nil {
 			s.logger.Error("failed to get last logs", "error", err)
