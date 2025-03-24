@@ -32,6 +32,8 @@ github.com/nebius/gosdk v0.0.0-20250204111340-ed820f5794d4 h1:TGAXQUX7rQ9ae2NZHH
 github.com/nebius/gosdk v0.0.0-20250204111340-ed820f5794d4/go.mod h1:+j7TLKaoWpW8gUNi1Q+IHuhp0MpHOAXnch25FWdW3WI=
 github.com/nebius/gosdk v0.0.0-20250219114623-bac7696d4cb8 h1:Yj0QRtF/r+4s8GcUcKLoUvBEvYD5oW5NDz9hcU3/9kU=
 github.com/nebius/gosdk v0.0.0-20250219114623-bac7696d4cb8/go.mod h1:d0iaJFMQofs+hV0K25+8wVvMHdNxPmxMbIYfhOpZAt8=
+github.com/nebius/gosdk v0.0.0-20250321225023-d65cca70d9a3 h1:v5ET1Sv93c8y6+o3/GTGFfJiAag/LYIVdLJDGRP1z4I=
+github.com/nebius/gosdk v0.0.0-20250321225023-d65cca70d9a3/go.mod h1:d0iaJFMQofs+hV0K25+8wVvMHdNxPmxMbIYfhOpZAt8=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c h1:ncq/mPwQF4JjgDlrVEn3C11VoGHZN7m8qihwgMEtzYw=
