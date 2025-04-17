@@ -1,6 +1,6 @@
 #!/bin/bash
 set -ex
-UPDATER_ENDPOINT=observability-agent-manager.api.eu.nebius.cloud
+UPDATER_ENDPOINT=observability-agent-manager.api.nebius.cloud
 
 UPDATER_ENDPOINT_PATH_OVERRIDE=/mnt/cloud-metadata/updater-endpoint-override
 if [ -f $UPDATER_ENDPOINT_PATH_OVERRIDE ]; then
