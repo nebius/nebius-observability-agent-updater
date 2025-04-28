@@ -8,9 +8,11 @@ fi
 
 rm -rf $DEB_BUILD_DIR
 
+GOARCH=${GOARCH:-"amd64"}
 cp -r debian $DEB_BUILD_DIR/
 mkdir -p $DEB_BUILD_DIR/usr/bin
 cp nebius-observability-agent-updater $DEB_BUILD_DIR/usr/bin/nebius-observability-agent-updater
 echo "Version: $NEBIUS_UPDATER_VERSION" >> $DEB_BUILD_DIR/DEBIAN/control
+echo "Architecture: $GOARCH" >> $DEB_BUILD_DIR/DEBIAN/control
 dpkg-deb --build $DEB_BUILD_DIR
 mv /tmp/nebius-observability-agent-updater.deb nebius-observability-agent-updater-$NEBIUS_UPDATER_VERSION.deb
