@@ -85,7 +85,6 @@ func (h *Helper) getGPUInfoStr(output string) (model string, number int, err err
 	}
 
 	return model, number, nil
-
 }
 
 func (h *Helper) getDCGMHostengineVersion(output string) (string, error) {
