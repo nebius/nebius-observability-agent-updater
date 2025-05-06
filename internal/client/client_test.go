@@ -92,6 +92,20 @@ func (m *mockOSHelper) GetLastLogs(string, int) (string, error) {
 	return "logs", nil
 }
 
+type mockDcgmHelper struct {
+	mock.Mock
+}
+
+func (m *mockDcgmHelper) GetDCGMVersion() (string, error) {
+	args := m.Called()
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockDcgmHelper) GetGpuInfo() (string, int, error) {
+	args := m.Called()
+	return args.String(0), args.Int(1), args.Error(2)
+}
+
 type mockVersionServiceClient struct {
 	mock.Mock
 }
@@ -154,8 +168,8 @@ func TestNew(t *testing.T) {
 			Timeout:  5 * time.Second,
 		},
 	}
-
-	client, err := New(metadata, oh, &cfg, nil, tokenFunc)
+	dh := &mockDcgmHelper{}
+	client, err := New(metadata, oh, dh, &cfg, nil, tokenFunc)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.conn)
@@ -165,11 +179,13 @@ func TestNew(t *testing.T) {
 func TestSendAgentData(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
+	dh := &mockDcgmHelper{}
 	mockClient := &mockVersionServiceClient{}
 
 	client := &Client{
 		metadata:     metadata,
 		oh:           oh,
+		dh:           dh,
 		client:       mockClient,
 		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		config: &config.Config{
@@ -190,6 +206,9 @@ func TestSendAgentData(t *testing.T) {
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetMk8sClusterId").Return("abcd", nil)
+
+	dh.On("GetDCGMVersion").Return("3.3.7", nil)
+	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
 
 	expectedResponse := &agentmanager.GetVersionResponse{
 		Action: agentmanager.Action_NOP,
@@ -219,10 +238,12 @@ func TestSendAgentData(t *testing.T) {
 func TestFillRequest(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
+	dh := &mockDcgmHelper{}
 
 	client := &Client{
 		metadata:     metadata,
 		oh:           oh,
+		dh:           dh,
 		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		config:       &config.Config{},
@@ -238,6 +259,9 @@ func TestFillRequest(t *testing.T) {
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetMk8sClusterId", mock.Anything).Return("abcd", nil)
+
+	dh.On("GetDCGMVersion").Return("3.3.7", nil)
+	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
 
 	// Create mock health check response using the correct structure
 	checkStatuses := map[string]healthcheck.CheckStatus{
@@ -294,6 +318,9 @@ func TestFillRequest(t *testing.T) {
 	assert.Equal(t, durationpb.New(1*time.Hour), req.SystemUptime)
 	assert.Equal(t, "some-error", req.LastUpdateError)
 	assert.Equal(t, "abcd", req.Mk8SClusterId)
+	assert.Equal(t, "3.3.7", req.DcgmVersion)
+	assert.Equal(t, "NVIDIA H200", req.GpuModel)
+	assert.Equal(t, int32(2), req.GpuNumber)
 
 	// Verify module health statuses
 	assert.NotNil(t, req.ModulesHealth)
@@ -313,11 +340,13 @@ func TestFillRequest(t *testing.T) {
 func TestSendAgentDataWithRetry(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
+	dh := &mockDcgmHelper{}
 	mockClient := &mockVersionServiceClient{}
 
 	client := &Client{
 		metadata: metadata,
 		oh:       oh,
+		dh:       dh,
 		client:   mockClient,
 		config: &config.Config{
 			GRPC: clientconfig.GRPCConfig{
@@ -344,6 +373,8 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetMk8sClusterId").Return("abcd", nil)
 
+	dh.On("GetDCGMVersion").Return("3.3.7", nil)
+	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
 	expectedResponse := &agentmanager.GetVersionResponse{
 		Action: agentmanager.Action_NOP,
 	}
@@ -381,11 +412,13 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
+	dh := &mockDcgmHelper{}
 	mockClient := &mockVersionServiceClient{}
 
 	client := &Client{
 		metadata: metadata,
 		oh:       oh,
+		dh:       dh,
 		client:   mockClient,
 		config: &config.Config{
 			GRPC: clientconfig.GRPCConfig{
@@ -413,6 +446,9 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetMk8sClusterId").Return("abcd", nil)
+
+	dh.On("GetDCGMVersion").Return("3.3.7", nil)
+	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
 
 	// Simulate continuous failures
 	mockClient.On("GetVersion", mock.Anything, mock.Anything, mock.Anything).
@@ -444,10 +480,12 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 func TestFillRequestDebNotFound(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
+	dh := &mockDcgmHelper{}
 
 	client := &Client{
 		metadata:     metadata,
 		oh:           oh,
+		dh:           dh,
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		config:       &config.Config{},
@@ -471,6 +509,9 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 	oh.On("GetMk8sClusterId").Return("abcd", nil)
+
+	dh.On("GetDCGMVersion").Return("3.3.7", nil)
+	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
 
 	req := client.fillRequest(agentData)
 
