@@ -7,6 +7,7 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/application"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
+	"github.com/nebius/nebius-observability-agent-updater/internal/dcgm"
 	"github.com/nebius/nebius-observability-agent-updater/internal/loggerhelper"
 	"github.com/nebius/nebius-observability-agent-updater/internal/metadata"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
@@ -32,7 +33,8 @@ func main() {
 	logger := loggerhelper.InitLogger(&cfg.Logger)
 	metadataReader := metadata.NewReader(cfg.Metadata, logger)
 	oh := osutils.NewOsHelper()
-	cli, err := client.New(metadataReader, oh, cfg, logger, metadataReader.GetIamToken)
+	dh := dcgm.NewDcgmHelper()
+	cli, err := client.New(metadataReader, oh, dh, cfg, logger, metadataReader.GetIamToken)
 	if err != nil {
 		logger.Error("failed to create client", "error", err)
 		defer syscall.Exit(1)

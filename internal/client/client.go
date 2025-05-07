@@ -42,6 +42,11 @@ type oshelper interface {
 	GetLastLogs(serviceName string, lines int) (string, error)
 }
 
+type dcgmhelper interface {
+	GetDCGMVersion() (string, error)
+	GetGpuInfo() (model string, number int, err error)
+}
+
 const (
 	ENDPOINT_ENV     = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
 	UserAgent        = "nebius-observability-agent-updater"
@@ -58,11 +63,12 @@ type Client struct {
 	client           agentmanager.VersionServiceClient
 	logger           *slog.Logger
 	oh               oshelper
+	dh               dcgmhelper
 	retryBackoff     backoff.BackOff
 	getTokenCallback func() (string, error)
 }
 
-func New(metadata metadataReader, oh oshelper, config *config.Config, logger *slog.Logger, getTokenCallback func() (string, error)) (*Client, error) {
+func New(metadata metadataReader, oh oshelper, dh dcgmhelper, config *config.Config, logger *slog.Logger, getTokenCallback func() (string, error)) (*Client, error) {
 	if config.GRPC.Endpoint == "" {
 		endpoint := os.Getenv(ENDPOINT_ENV)
 		if endpoint == "" {
@@ -96,6 +102,7 @@ func New(metadata metadataReader, oh oshelper, config *config.Config, logger *sl
 		client:           client,
 		logger:           logger,
 		oh:               oh,
+		dh:               dh,
 		retryBackoff:     getRetryBackoff(config.GRPC.Retry),
 		getTokenCallback: getTokenCallback,
 	}, nil
@@ -319,6 +326,21 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		s.logger.Error("failed to get cloud-init status", "error", err)
 	} else {
 		req.CloudInitStatus = cloudInitStatus
+	}
+
+	dcgmVersion, err := s.dh.GetDCGMVersion()
+	if err != nil {
+		s.logger.Error("failed to get DCGM version", "error", err)
+	} else {
+		req.DcgmVersion = dcgmVersion
+	}
+
+	gpuModel, gpuNumber, err := s.dh.GetGpuInfo()
+	if err != nil {
+		s.logger.Error("failed to get GPU info", "error", err)
+	} else {
+		req.GpuModel = gpuModel
+		req.GpuNumber = int32(gpuNumber)
 	}
 
 	return &req

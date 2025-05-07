@@ -6,7 +6,7 @@ toolchain go1.23.3
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/nebius/gosdk v0.0.0-20250321225023-d65cca70d9a3
+	github.com/nebius/gosdk v0.0.0-20250505140419-9e3daa7d020f
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/goleak v1.3.0
