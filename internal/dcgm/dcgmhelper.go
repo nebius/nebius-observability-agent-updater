@@ -59,7 +59,7 @@ func (h *Helper) getGPUInfoStr(output string) (model string, number int, err err
 		+--------+----------------------------------------------------------------------+
 		+--------+----------------------------------------------------------------------+
 	*/
-	numRegex := regexp.MustCompile(`(\d+)\s+GPU found`)
+	numRegex := regexp.MustCompile(`(\d+)\s+GPUs? found`)
 	numMatches := numRegex.FindStringSubmatch(output)
 	if len(numMatches) >= 2 {
 		number, err = strconv.Atoi(numMatches[1])

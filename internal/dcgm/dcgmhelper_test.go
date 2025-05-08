@@ -28,7 +28,7 @@ func TestGetGpuInfoStr(t *testing.T) {
 		},
 		{
 			name: "Valid input with multiple GPUs",
-			input: `4 GPU found.
+			input: `4 GPUs found.
 +--------+----------------------------------------------------------------------+
 | GPU ID | Device Information                                                   |
 +--------+----------------------------------------------------------------------+
@@ -60,7 +60,7 @@ func TestGetGpuInfoStr(t *testing.T) {
 		},
 		{
 			name: "Missing Name field",
-			input: `2 GPU found.
+			input: `2 GPUs found.
 +--------+----------------------------------------------------------------------+
 | GPU ID | Device Information                                                   |
 +--------+----------------------------------------------------------------------+
