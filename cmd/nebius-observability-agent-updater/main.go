@@ -18,6 +18,11 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	exitCode := 0
 	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 	var cfg *config.Config
@@ -37,8 +42,7 @@ func main() {
 	cli, err := client.New(metadataReader, oh, dh, cfg, logger, metadataReader.GetIamToken)
 	if err != nil {
 		logger.Error("failed to create client", "error", err)
-		defer syscall.Exit(1)
-		return
+		return 1
 	}
 	agentsList := []agents.AgentData{agents.NewO11yagent()}
 	app := application.New(cfg, cli, logger, agentsList, oh)
@@ -54,7 +58,6 @@ func main() {
 		errChan <- app.Run(ctx)
 	}()
 
-	exitCode := 0
 	select {
 	case err := <-errChan:
 		if err != nil {
@@ -74,5 +77,5 @@ func main() {
 			logger.Info("App shut down gracefully")
 		}
 	}
-	defer os.Exit(exitCode)
+	return exitCode
 }
