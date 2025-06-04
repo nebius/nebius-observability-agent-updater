@@ -1,9 +1,9 @@
 #!/bin/bash
 set -ex
 systemctl enable nebius_observability_agent_updater.service
-
-systemctl restart nebius_observability_agent_updater.service
-
+if [ "$(systemctl is-system-running)" != "offline" ]; then # Check if running under systemd
+  systemctl restart nebius_observability_agent_updater.service
+fi
 mkdir -p /var/lib/nebius-observability-agent-updater
 
 chmod 0640 /etc/nebius-observability-agent-updater/config.yaml
