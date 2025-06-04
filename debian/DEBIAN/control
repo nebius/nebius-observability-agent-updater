@@ -1,5 +1,5 @@
 Package: nebius-observability-agent-updater
 Name: Nebius Observability Agent Updater
 Description: Service to update the Nebius Observability Agent
-Author:: Nebius <support@nebius.ai>
+Author: Nebius <support@nebius.ai>
 Maintainer: Nebius <support@nebius.ai>

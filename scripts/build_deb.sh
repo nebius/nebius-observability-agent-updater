@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 set -x
 DEB_BUILD_DIR=/tmp/nebius-observability-agent-updater
 
