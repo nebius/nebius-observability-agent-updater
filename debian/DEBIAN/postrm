@@ -6,7 +6,9 @@ case "$1" in
         ;;
     remove)
         systemctl disable nebius_observability_agent_updater.service
-        systemctl stop nebius_observability_agent_updater.service
+        if [ "$(systemctl is-system-running)" != "offline" ]; then # Check if running under systemd
+            systemctl stop nebius_observability_agent_updater.service
+        fi
         rm -rf /var/lib/nebius-observability-agent-updater
         ;;
     upgrade|failed-upgrade|disappear)
