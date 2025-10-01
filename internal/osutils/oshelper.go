@@ -1,6 +1,7 @@
 package osutils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/shirou/gopsutil/v3/host"
@@ -22,7 +23,10 @@ func NewOsHelper() *OsHelper {
 var ErrDebNotFound = fmt.Errorf("package not found")
 
 func (o OsHelper) GetDebVersion(name string) (string, error) {
-	cmd := exec.Command("dpkg-query", "-W", "-f=${Version}", name)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "dpkg-query", "-W", "-f=${Version}", name)
 	output, err := cmd.Output()
 
 	if err != nil {
@@ -32,7 +36,10 @@ func (o OsHelper) GetDebVersion(name string) (string, error) {
 }
 
 func (o OsHelper) getSystemdPid(serviceName string) (int32, error) {
-	cmd := exec.Command("systemctl", "show", "--property=MainPID", "--value", serviceName)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "systemctl", "show", "--property=MainPID", "--value", serviceName)
 	output, err := cmd.Output()
 
 	if err != nil {
@@ -47,7 +54,10 @@ func (o OsHelper) getSystemdPid(serviceName string) (int32, error) {
 }
 
 func (o OsHelper) GetSystemdStatus(serviceName string) (string, error) {
-	cmd := exec.Command("systemctl", "is-active", serviceName)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "systemctl", "is-active", serviceName)
 	output, _ := cmd.Output()
 
 	// ignore errors since systemctl returns non-zero exit code when service is inactive
@@ -57,7 +67,10 @@ func (o OsHelper) GetSystemdStatus(serviceName string) (string, error) {
 }
 
 func (o OsHelper) GetLastLogs(serviceName string, lines int) (string, error) {
-	cmd := exec.Command("journalctl", "-u", serviceName, "--no-pager", fmt.Sprintf("--lines=%d", lines))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", serviceName, "--no-pager", fmt.Sprintf("--lines=%d", lines))
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get logs for %s: %w", serviceName, err)
@@ -102,7 +115,10 @@ func (o OsHelper) GetSystemUptime() (time.Duration, error) {
 }
 
 func (o OsHelper) GetOsName() (string, error) {
-	cmd := exec.Command("lsb_release", "-d")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "lsb_release", "-d")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -115,7 +131,10 @@ func (o OsHelper) GetOsName() (string, error) {
 }
 
 func (o OsHelper) GetUname() (string, error) {
-	cmd := exec.Command("uname", "-a")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "uname", "-a")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -124,7 +143,10 @@ func (o OsHelper) GetUname() (string, error) {
 }
 
 func (o OsHelper) GetArch() (string, error) {
-	cmd := exec.Command("uname", "-m")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "uname", "-m")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -133,7 +155,10 @@ func (o OsHelper) GetArch() (string, error) {
 }
 
 func (o OsHelper) InstallPackage(packageName string, version string) error {
-	cmd := exec.Command("apt-get", "install", "--allow-downgrades", "-y", packageName+"="+version)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "apt-get", "install", "--allow-downgrades", "-y", packageName+"="+version)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to install package %s=%s: %w: %s", packageName, version, err, output)
@@ -142,7 +167,10 @@ func (o OsHelper) InstallPackage(packageName string, version string) error {
 }
 
 func (o OsHelper) UpdateRepo(scriptPath string) error {
-	cmd := exec.Command(scriptPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, scriptPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to update repo: %w: %s", err, output)
