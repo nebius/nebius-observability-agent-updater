@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+
 	"github.com/cenkalti/backoff/v4"
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
@@ -14,14 +15,15 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 
+	"log/slog"
+	"os"
+	"time"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"log/slog"
-	"os"
-	"time"
 )
 
 type metadataReader interface {
@@ -54,6 +56,7 @@ const (
 	CpuHealthKey     = "cpu"
 	GpuHealthKey     = "gpu"
 	CiliumHealthKey  = "cilium"
+	VmappsHealthKey  = "vmapps"
 )
 
 type Client struct {
@@ -283,8 +286,10 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	gpuError, req.ModulesHealth.GpuPipeline = s.processModuleHealth(GpuHealthKey, response.CheckStatuses)
 	ciliumError := false
 	ciliumError, req.ModulesHealth.CiliumPipeline = s.processModuleHealth(CiliumHealthKey, response.CheckStatuses)
+	vmappsError := false
+	vmappsError, req.ModulesHealth.VmappsPipeline = s.processModuleHealth(VmappsHealthKey, response.CheckStatuses)
 
-	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError {
+	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError && !vmappsError {
 		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
 		if err != nil {
 			s.logger.Error("failed to get last logs", "error", err)

@@ -1,11 +1,13 @@
 package dcgm
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Helper struct {
@@ -16,7 +18,10 @@ func NewDcgmHelper() *Helper {
 }
 
 func (h *Helper) GetDCGMVersion() (string, error) {
-	cmd := exec.Command("dcgmi", "-v")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "dcgmi", "-v")
 	output, err := cmd.Output()
 
 	if err != nil {
@@ -27,7 +32,10 @@ func (h *Helper) GetDCGMVersion() (string, error) {
 }
 
 func (h *Helper) GetGpuInfo() (model string, number int, err error) {
-	cmd := exec.Command("dcgmi", "discovery", "-l")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "dcgmi", "discovery", "-l")
 	output, err := cmd.Output()
 
 	if err != nil {
