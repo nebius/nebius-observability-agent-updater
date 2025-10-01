@@ -1,11 +1,13 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -30,7 +32,10 @@ func (r *Reader) GetParentId() (string, error) {
 }
 
 func (r *Reader) GetInstanceId() (instanceId string, isFallback bool, err error) {
-	cmd := exec.Command("cloud-init", "query", "instance-id")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "cloud-init", "query", "instance-id")
 	output, err := cmd.Output()
 	if err != nil {
 		instanceId, err2 := r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
