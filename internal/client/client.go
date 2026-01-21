@@ -5,6 +5,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
@@ -14,10 +17,6 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/constants"
 	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
-
-	"log/slog"
-	"os"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -42,6 +41,8 @@ type oshelper interface {
 	GetArch() (string, error)
 	GetMk8sClusterId(path string) string
 	GetLastLogs(serviceName string, lines int) (string, error)
+	GetDirectorySize(path string) (int64, error)
+	GetMountpointSize(path string) (int64, error)
 }
 
 type dcgmhelper interface {
@@ -50,13 +51,15 @@ type dcgmhelper interface {
 }
 
 const (
-	ENDPOINT_ENV     = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
-	UserAgent        = "nebius-observability-agent-updater"
-	ProcessHealthKey = "process"
-	CpuHealthKey     = "cpu"
-	GpuHealthKey     = "gpu"
-	CiliumHealthKey  = "cilium"
-	VmappsHealthKey  = "vmapps"
+	ENDPOINT_ENV               = "NEBIUS_OBSERVABILITY_AGENT_UPDATER_ENDPOINT"
+	UserAgent                  = "nebius-observability-agent-updater"
+	ProcessHealthKey           = "process"
+	CpuHealthKey               = "cpu"
+	GpuHealthKey               = "gpu"
+	CiliumHealthKey            = "cilium"
+	VmappsHealthKey            = "vmapps"
+	CommonServiceLogsHealthKey = "common_service_logs"
+	VmServiceLogsHealthKey     = "vm_service_logs"
 )
 
 type Client struct {
@@ -288,8 +291,12 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	ciliumError, req.ModulesHealth.CiliumPipeline = s.processModuleHealth(CiliumHealthKey, response.CheckStatuses)
 	vmappsError := false
 	vmappsError, req.ModulesHealth.VmappsPipeline = s.processModuleHealth(VmappsHealthKey, response.CheckStatuses)
+	commonServiceLogsError := false
+	commonServiceLogsError, req.ModulesHealth.CommonServiceLogsPipeline = s.processModuleHealth(CommonServiceLogsHealthKey, response.CheckStatuses)
+	vmServiceLogsError := false
+	vmServiceLogsError, req.ModulesHealth.VmServiceLogsPipeline = s.processModuleHealth(VmServiceLogsHealthKey, response.CheckStatuses)
 
-	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError && !vmappsError {
+	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError && !vmappsError && !commonServiceLogsError && !vmServiceLogsError {
 		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
 		if err != nil {
 			s.logger.Error("failed to get last logs", "error", err)
@@ -346,6 +353,23 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		req.GpuModel = gpuModel
 		req.GpuNumber = int32(gpuNumber)
+	}
+
+	if s.config.HealthCheckPath != "" {
+		req.HealthcheckLogs = &agentmanager.HealthCheckLogs{}
+		dirSize, err := s.oh.GetDirectorySize(s.config.HealthCheckPath)
+		if err != nil {
+			s.logger.Error("failed to get healthcheck directory size", "error", err)
+		} else {
+			req.HealthcheckLogs.DirectorySizeBytes = dirSize
+		}
+
+		mountpointSize, err := s.oh.GetMountpointSize(s.config.HealthCheckPath)
+		if err != nil {
+			s.logger.Error("failed to get healthcheck mountpoint size", "error", err)
+		} else {
+			req.HealthcheckLogs.MountpointTotalBytes = mountpointSize
+		}
 	}
 
 	return &req

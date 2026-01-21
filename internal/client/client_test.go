@@ -3,6 +3,11 @@ package client
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
@@ -10,10 +15,6 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"log/slog"
-	"os"
-	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -90,6 +91,14 @@ func (m *mockOSHelper) GetSystemdStatus(string) (string, error) {
 
 func (m *mockOSHelper) GetLastLogs(string, int) (string, error) {
 	return "logs", nil
+}
+
+func (m *mockOSHelper) GetDirectorySize(string) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockOSHelper) GetMountpointSize(string) (int64, error) {
+	return 0, nil
 }
 
 type mockDcgmHelper struct {

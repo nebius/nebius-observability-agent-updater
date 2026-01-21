@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/process"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 type OsHelper struct {
@@ -184,4 +185,52 @@ func (o OsHelper) GetMk8sClusterId(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(content))
+}
+
+func (o OsHelper) GetDirectorySize(path string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "du", "-sb", path)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get directory size for %s: %w", path, err)
+	}
+
+	// Parse output: "size\tpath"
+	fields := strings.Fields(string(output))
+	if len(fields) < 1 {
+		return 0, fmt.Errorf("unexpected du output format")
+	}
+
+	size, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse directory size: %w", err)
+	}
+
+	return size, nil
+}
+
+func (o OsHelper) GetMountpointSize(path string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "df", "--output=size", "-B1", path)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get mountpoint size for %s: %w", path, err)
+	}
+
+	// Parse output: first line is header "1B-blocks", second line is the size
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 2 {
+		return 0, fmt.Errorf("unexpected df output format")
+	}
+
+	size, err := strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse mountpoint size: %w", err)
+	}
+
+	return size, nil
 }
