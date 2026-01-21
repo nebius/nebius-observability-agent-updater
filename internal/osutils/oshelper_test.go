@@ -105,24 +105,28 @@ func TestGetDirectorySize(t *testing.T) {
 		path        string
 		expectError bool
 		checkSize   bool
+		expectZero  bool
 	}{
 		{
 			name:        "Valid directory with files",
 			path:        tempDir,
 			expectError: false,
 			checkSize:   true,
+			expectZero:  false,
 		},
 		{
 			name:        "Non-existent directory",
 			path:        "/path/that/does/not/exist/at/all",
-			expectError: true,
+			expectError: false,
 			checkSize:   false,
+			expectZero:  true,
 		},
 		{
 			name:        "Empty path",
 			path:        "",
 			expectError: true,
 			checkSize:   false,
+			expectZero:  false,
 		},
 	}
 
@@ -140,6 +144,9 @@ func TestGetDirectorySize(t *testing.T) {
 				}
 				if tc.checkSize && size <= 0 {
 					t.Errorf("Expected positive size for path %s, but got %d", tc.path, size)
+				}
+				if tc.expectZero && size != 0 {
+					t.Errorf("Expected zero size for non-existent path %s, but got %d", tc.path, size)
 				}
 			}
 		})
@@ -167,30 +174,35 @@ func TestGetMountpointSize(t *testing.T) {
 		path        string
 		expectError bool
 		checkSize   bool
+		expectZero  bool
 	}{
 		{
 			name:        "Valid path (temp directory)",
 			path:        tempDir,
 			expectError: false,
 			checkSize:   true,
+			expectZero:  false,
 		},
 		{
 			name:        "Root directory",
 			path:        "/",
 			expectError: false,
 			checkSize:   true,
+			expectZero:  false,
 		},
 		{
 			name:        "Non-existent path",
 			path:        "/path/that/does/not/exist/at/all",
-			expectError: true,
+			expectError: false,
 			checkSize:   false,
+			expectZero:  true,
 		},
 		{
 			name:        "Empty path",
 			path:        "",
 			expectError: true,
 			checkSize:   false,
+			expectZero:  false,
 		},
 	}
 
@@ -208,6 +220,9 @@ func TestGetMountpointSize(t *testing.T) {
 				}
 				if tc.checkSize && size <= 0 {
 					t.Errorf("Expected positive size for path %s, but got %d", tc.path, size)
+				}
+				if tc.expectZero && size != 0 {
+					t.Errorf("Expected zero size for non-existent path %s, but got %d", tc.path, size)
 				}
 			}
 		})

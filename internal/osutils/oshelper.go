@@ -188,6 +188,17 @@ func (o OsHelper) GetMk8sClusterId(path string) string {
 }
 
 func (o OsHelper) GetDirectorySize(path string) (int64, error) {
+	// Validate that path is not empty
+	if path == "" {
+		return 0, fmt.Errorf("path cannot be empty")
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Directory doesn't exist, return 0 size without error
+		return 0, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -212,6 +223,17 @@ func (o OsHelper) GetDirectorySize(path string) (int64, error) {
 }
 
 func (o OsHelper) GetMountpointSize(path string) (int64, error) {
+	// Validate that path is not empty
+	if path == "" {
+		return 0, fmt.Errorf("path cannot be empty")
+	}
+
+	// Check if path exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Path doesn't exist, return 0 size without error
+		return 0, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
