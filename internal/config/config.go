@@ -1,10 +1,11 @@
 package config
 
 import (
+	"time"
+
 	"github.com/nebius/nebius-observability-agent-updater/internal/client/clientconfig"
 	"github.com/nebius/nebius-observability-agent-updater/internal/loggerhelper"
 	"github.com/nebius/nebius-observability-agent-updater/internal/metadata"
-	"time"
 )
 
 type Config struct {
@@ -15,6 +16,7 @@ type Config struct {
 	Logger               loggerhelper.LogConfig  `yaml:"logger"`
 	UpdateRepoScriptPath string                  `yaml:"update_repo_script_path"`
 	Mk8sClusterIdPath    string                  `yaml:"mk8s_cluster_id_path"`
+	HealthCheckPath      string                  `yaml:"healthcheck_path"`
 }
 
 func GetDefaultConfig() *Config {
@@ -29,6 +31,7 @@ func GetDefaultConfig() *Config {
 			IamTokenFilename:   "tsa-token",
 		},
 		Mk8sClusterIdPath: "/usr/local/etc/mk8s-cluster-id",
+		HealthCheckPath:   "/var/log/nebius-logs",
 		GRPC:              clientconfig.GetDefaultGrpcConfig(),
 		Logger: loggerhelper.LogConfig{
 			LogLevel: "INFO",
