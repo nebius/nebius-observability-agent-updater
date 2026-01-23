@@ -31,18 +31,38 @@ type metadataReader interface {
 	GetIamToken() (string, error)
 }
 
-type oshelper interface {
+type packageManager interface {
 	GetDebVersion(packageName string) (string, error)
+}
+
+type systemInfo interface {
 	GetServiceUptime(serviceName string) (time.Duration, error)
 	GetSystemUptime() (time.Duration, error)
 	GetSystemdStatus(serviceName string) (string, error)
 	GetOsName() (string, error)
 	GetUname() (string, error)
 	GetArch() (string, error)
-	GetMk8sClusterId(path string) string
+}
+
+type systemLogger interface {
 	GetLastLogs(serviceName string, lines int) (string, error)
+}
+
+type storageInfo interface {
 	GetDirectorySize(path string) (int64, error)
 	GetMountpointSize(path string) (int64, error)
+}
+
+type clusterInfo interface {
+	GetMk8sClusterId(path string) string
+}
+
+type oshelper interface {
+	packageManager
+	systemInfo
+	systemLogger
+	storageInfo
+	clusterInfo
 }
 
 type dcgmhelper interface {
@@ -82,7 +102,7 @@ func New(metadata metadataReader, oh oshelper, dh dcgmhelper, config *config.Con
 		}
 		config.GRPC.Endpoint = endpoint
 	}
-	var dialOptions []grpc.DialOption
+	dialOptions := make([]grpc.DialOption, 0, 3)
 	creds := credentials.NewTLS(&tls.Config{})
 	// FIXME fill from config
 	dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
@@ -176,7 +196,7 @@ func (s *Client) processModuleHealth(healthKey string, statuses map[string]healt
 			isError = true
 			state = agentmanager.AgentState_STATE_ERROR
 		}
-		var params []*agentmanager.Parameter
+		params := make([]*agentmanager.Parameter, 0, len(health.Parameters))
 		for _, p := range health.Parameters {
 			params = append(params, &agentmanager.Parameter{
 				Name:  p.Name,
@@ -192,11 +212,7 @@ func (s *Client) processModuleHealth(healthKey string, statuses map[string]healt
 	return false, nil
 }
 
-// nolint: gocognit
-func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
-	req := agentmanager.GetVersionRequest{}
-	req.Type = agent.GetAgentType()
-
+func (s *Client) fillVersionInfo(req *agentmanager.GetVersionRequest, agent agents.AgentData) {
 	agentVersion, err := s.oh.GetDebVersion(agent.GetDebPackageName())
 	if err != nil {
 		if !errors.Is(err, osutils.ErrDebNotFound) {
@@ -218,7 +234,9 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		req.UpdaterVersion = updaterVersion
 	}
+}
 
+func (s *Client) fillMetadataInfo(req *agentmanager.GetVersionRequest) {
 	parentId, err := s.metadata.GetParentId()
 	if err != nil {
 		s.logger.Error("failed to get parent id", "error", err)
@@ -232,8 +250,10 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		req.InstanceId = instanceId
 	}
-
 	req.InstanceIdUsedFallback = cloudInitFallback
+}
+
+func (s *Client) fillOSInfo(req *agentmanager.GetVersionRequest) {
 	osinfo := agentmanager.OSInfo{}
 	osName, err := s.oh.GetOsName()
 	if err != nil {
@@ -255,8 +275,10 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		osinfo.Architecture = arch
 	}
-
 	req.OsInfo = &osinfo
+}
+
+func (s *Client) fillHealthInfo(req *agentmanager.GetVersionRequest, agent agents.AgentData) {
 	healthy, response := agent.IsAgentHealthy()
 	if healthy {
 		req.AgentState = agentmanager.AgentState_STATE_HEALTHY
@@ -265,12 +287,13 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	}
 	req.AgentStateMessages = response.Reasons
 	req.ModulesHealth = &agentmanager.ModulesHealth{}
+
 	if processHealth, found := response.CheckStatuses[ProcessHealthKey]; found {
 		state := agentmanager.AgentState_STATE_HEALTHY
 		if !processHealth.IsOk {
 			state = agentmanager.AgentState_STATE_ERROR
 		}
-		var params []*agentmanager.Parameter
+		params := make([]*agentmanager.Parameter, 0, len(processHealth.Parameters))
 		for _, p := range processHealth.Parameters {
 			params = append(params, &agentmanager.Parameter{
 				Name:  p.Name,
@@ -283,17 +306,13 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 			Parameters: params,
 		}
 	}
-	cpuError := false
+
+	var cpuError, gpuError, ciliumError, vmappsError, commonServiceLogsError, vmServiceLogsError bool
 	cpuError, req.ModulesHealth.CpuPipeline = s.processModuleHealth(CpuHealthKey, response.CheckStatuses)
-	gpuError := false
 	gpuError, req.ModulesHealth.GpuPipeline = s.processModuleHealth(GpuHealthKey, response.CheckStatuses)
-	ciliumError := false
 	ciliumError, req.ModulesHealth.CiliumPipeline = s.processModuleHealth(CiliumHealthKey, response.CheckStatuses)
-	vmappsError := false
 	vmappsError, req.ModulesHealth.VmappsPipeline = s.processModuleHealth(VmappsHealthKey, response.CheckStatuses)
-	commonServiceLogsError := false
 	commonServiceLogsError, req.ModulesHealth.CommonServiceLogsPipeline = s.processModuleHealth(CommonServiceLogsHealthKey, response.CheckStatuses)
-	vmServiceLogsError := false
 	vmServiceLogsError, req.ModulesHealth.VmServiceLogsPipeline = s.processModuleHealth(VmServiceLogsHealthKey, response.CheckStatuses)
 
 	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError && !vmappsError && !commonServiceLogsError && !vmServiceLogsError {
@@ -304,7 +323,9 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 			req.LastAgentLogs = lastLogs
 		}
 	}
+}
 
+func (s *Client) fillUptimeInfo(req *agentmanager.GetVersionRequest, agent agents.AgentData) {
 	agentUptime, err := s.oh.GetServiceUptime(agent.GetServiceName())
 	if err != nil {
 		s.logger.Error("failed to get agent uptime", "error", err)
@@ -325,21 +346,9 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	} else {
 		req.SystemUptime = durationpb.New(systemUptime)
 	}
+}
 
-	lastError := agent.GetLastUpdateError()
-	if lastError != nil {
-		req.LastUpdateError = lastError.Error()
-	}
-
-	req.Mk8SClusterId = s.oh.GetMk8sClusterId(s.config.Mk8sClusterIdPath)
-
-	cloudInitStatus, err := s.oh.GetSystemdStatus(constants.CloudInitServiceName)
-	if err != nil {
-		s.logger.Error("failed to get cloud-init status", "error", err)
-	} else {
-		req.CloudInitStatus = cloudInitStatus
-	}
-
+func (s *Client) fillGPUInfo(req *agentmanager.GetVersionRequest) {
 	dcgmVersion, err := s.dh.GetDCGMVersion()
 	if err != nil {
 		s.logger.Error("failed to get DCGM version", "error", err)
@@ -354,7 +363,9 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 		req.GpuModel = gpuModel
 		req.GpuNumber = int32(gpuNumber)
 	}
+}
 
+func (s *Client) fillHealthCheckLogsInfo(req *agentmanager.GetVersionRequest) {
 	if s.config.HealthCheckPath != "" {
 		req.HealthcheckLogs = &agentmanager.HealthCheckLogs{}
 		dirSize, err := s.oh.GetDirectorySize(s.config.HealthCheckPath)
@@ -371,6 +382,34 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 			req.HealthcheckLogs.MountpointTotalBytes = mountpointSize
 		}
 	}
+}
+
+func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
+	req := agentmanager.GetVersionRequest{}
+	req.Type = agent.GetAgentType()
+
+	s.fillVersionInfo(&req, agent)
+	s.fillMetadataInfo(&req)
+	s.fillOSInfo(&req)
+	s.fillHealthInfo(&req, agent)
+	s.fillUptimeInfo(&req, agent)
+
+	lastError := agent.GetLastUpdateError()
+	if lastError != nil {
+		req.LastUpdateError = lastError.Error()
+	}
+
+	req.Mk8SClusterId = s.oh.GetMk8sClusterId(s.config.Mk8sClusterIdPath)
+
+	cloudInitStatus, err := s.oh.GetSystemdStatus(constants.CloudInitServiceName)
+	if err != nil {
+		s.logger.Error("failed to get cloud-init status", "error", err)
+	} else {
+		req.CloudInitStatus = cloudInitStatus
+	}
+
+	s.fillGPUInfo(&req)
+	s.fillHealthCheckLogsInfo(&req)
 
 	return &req
 }

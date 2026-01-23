@@ -134,20 +134,19 @@ func TestGetDirectorySize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			size, err := o.GetDirectorySize(tc.path)
 
-			if tc.expectError {
-				if err == nil {
-					t.Errorf("Expected an error for path %s, but got none", tc.path)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error for path %s: %v", tc.path, err)
-				}
-				if tc.checkSize && size <= 0 {
-					t.Errorf("Expected positive size for path %s, but got %d", tc.path, size)
-				}
-				if tc.expectZero && size != 0 {
-					t.Errorf("Expected zero size for non-existent path %s, but got %d", tc.path, size)
-				}
+			if tc.expectError && err == nil {
+				t.Errorf("Expected an error for path %s, but got none", tc.path)
+				return
+			}
+			if !tc.expectError && err != nil {
+				t.Errorf("Unexpected error for path %s: %v", tc.path, err)
+				return
+			}
+			if tc.checkSize && size <= 0 {
+				t.Errorf("Expected positive size for path %s, but got %d", tc.path, size)
+			}
+			if tc.expectZero && size != 0 {
+				t.Errorf("Expected zero size for non-existent path %s, but got %d", tc.path, size)
 			}
 		})
 	}
@@ -210,20 +209,19 @@ func TestGetMountpointSize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			size, err := o.GetMountpointSize(tc.path)
 
-			if tc.expectError {
-				if err == nil {
-					t.Errorf("Expected an error for path %s, but got none", tc.path)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error for path %s: %v", tc.path, err)
-				}
-				if tc.checkSize && size <= 0 {
-					t.Errorf("Expected positive size for path %s, but got %d", tc.path, size)
-				}
-				if tc.expectZero && size != 0 {
-					t.Errorf("Expected zero size for non-existent path %s, but got %d", tc.path, size)
-				}
+			if tc.expectError && err == nil {
+				t.Errorf("Expected an error for path %s, but got none", tc.path)
+				return
+			}
+			if !tc.expectError && err != nil {
+				t.Errorf("Unexpected error for path %s: %v", tc.path, err)
+				return
+			}
+			if tc.checkSize && size <= 0 {
+				t.Errorf("Expected positive size for path %s, but got %d", tc.path, size)
+			}
+			if tc.expectZero && size != 0 {
+				t.Errorf("Expected zero size for non-existent path %s, but got %d", tc.path, size)
 			}
 		})
 	}
