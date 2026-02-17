@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const instanceDataPath = "/v1/instance-data"
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, nil))
 }
@@ -21,8 +23,9 @@ func testLogger() *slog.Logger {
 func TestGetParentId_IMDS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "true", r.Header.Get("Metadata"))
-		if r.URL.Path == "/v1/instance-data" {
-			w.Write([]byte(`{"id": "inst-123", "parent_id": "parent-456"}`))
+		if r.URL.Path == instanceDataPath {
+			_, err := w.Write([]byte(`{"id": "inst-123", "parent_id": "parent-456"}`))
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
@@ -59,8 +62,9 @@ func TestGetInstanceId_FromFile(t *testing.T) {
 
 func TestGetInstanceId_IMDSFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/instance-data" {
-			w.Write([]byte(`{"id": "inst-from-imds", "parent_id": "parent-456"}`))
+		if r.URL.Path == instanceDataPath {
+			_, err := w.Write([]byte(`{"id": "inst-from-imds", "parent_id": "parent-456"}`))
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
@@ -84,8 +88,9 @@ func TestGetInstanceId_IMDSFallback(t *testing.T) {
 
 func TestGetInstanceId_IMDSFallbackURL(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/instance-data" {
-			w.Write([]byte(`{"id": "inst-fallback", "parent_id": "parent-fallback"}`))
+		if r.URL.Path == instanceDataPath {
+			_, err := w.Write([]byte(`{"id": "inst-fallback", "parent_id": "parent-fallback"}`))
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
@@ -111,7 +116,8 @@ func TestGetIamToken_IMDS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "true", r.Header.Get("Metadata"))
 		if r.URL.Path == "/v1/iam/tsa/token/access_token" {
-			w.Write([]byte("my-iam-token"))
+			_, err := w.Write([]byte("my-iam-token"))
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
@@ -152,9 +158,10 @@ func TestGetIamToken_FileFallback(t *testing.T) {
 func TestGetInstanceData_Cached(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/instance-data" {
+		if r.URL.Path == instanceDataPath {
 			callCount++
-			w.Write([]byte(`{"id": "inst-123", "parent_id": "parent-456"}`))
+			_, err := w.Write([]byte(`{"id": "inst-123", "parent_id": "parent-456"}`))
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
@@ -182,9 +189,10 @@ func TestGetInstanceData_Cached(t *testing.T) {
 func TestGetInstanceData_RefreshesAfterTTL(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/instance-data" {
+		if r.URL.Path == instanceDataPath {
 			callCount++
-			w.Write([]byte(fmt.Sprintf(`{"id": "inst-%d", "parent_id": "parent-%d"}`, callCount, callCount)))
+			_, err := fmt.Fprintf(w, `{"id": "inst-%d", "parent_id": "parent-%d"}`, callCount, callCount)
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
@@ -218,13 +226,14 @@ func TestGetInstanceData_RefreshesAfterTTL(t *testing.T) {
 func TestGetInstanceData_StaleCache_OnRefreshFailure(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/instance-data" {
+		if r.URL.Path == instanceDataPath {
 			callCount++
 			if callCount > 1 {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			w.Write([]byte(`{"id": "inst-original", "parent_id": "parent-original"}`))
+			_, err := w.Write([]byte(`{"id": "inst-original", "parent_id": "parent-original"}`))
+			assert.NoError(t, err)
 			return
 		}
 		http.NotFound(w, r)
