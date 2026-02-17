@@ -2,9 +2,15 @@
 set -ex
 UPDATER_ENDPOINT=observability-agent-manager.api.nebius.cloud
 
-UPDATER_ENDPOINT_PATH_OVERRIDE=/mnt/cloud-metadata/updater-endpoint-override
-if [ -f $UPDATER_ENDPOINT_PATH_OVERRIDE ]; then
-    UPDATER_ENDPOINT=$(cat $UPDATER_ENDPOINT_PATH_OVERRIDE)
+METADATA_BASE_URL="http://metadata.nebius.internal"
+METADATA_FALLBACK_URL="http://169.254.169.254"
+METADATA_HEADER="Metadata: true"
+
+# Try to get updater endpoint override from IMDS
+OVERRIDE=$(curl -s -f -H "$METADATA_HEADER" "${METADATA_BASE_URL}/v1/instance-data/o11y/updater-endpoint-override" 2>/dev/null || \
+           curl -s -f -H "$METADATA_HEADER" "${METADATA_FALLBACK_URL}/v1/instance-data/o11y/updater-endpoint-override" 2>/dev/null || true)
+if [ -n "$OVERRIDE" ]; then
+    UPDATER_ENDPOINT="$OVERRIDE"
 fi
 
 export GOMAXPROCS=1

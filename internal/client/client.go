@@ -248,13 +248,13 @@ func (s *Client) fillMetadataInfo(req *agentmanager.GetVersionRequest) {
 		req.ParentId = parentId
 	}
 
-	instanceId, cloudInitFallback, err := s.metadata.GetInstanceId()
+	instanceId, instanceIdFallback, err := s.metadata.GetInstanceId()
 	if err != nil {
 		s.logger.Error("failed to get instance id", "error", err)
 	} else {
 		req.InstanceId = instanceId
 	}
-	req.InstanceIdUsedFallback = cloudInitFallback
+	req.InstanceIdUsedFallback = instanceIdFallback
 }
 
 func (s *Client) fillOSInfo(req *agentmanager.GetVersionRequest) {
