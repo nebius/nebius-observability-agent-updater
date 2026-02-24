@@ -39,6 +39,10 @@ func (o *O11yagent) GetSystemdServiceName() string {
 	return "nebius-observability-agent"
 }
 
+func (o *O11yagent) GetEnvironmentFilePath() string {
+	return "/etc/nebius-observability-agent/environment"
+}
+
 func (o *O11yagent) IsAgentHealthy() (isHealthy bool, response healthcheck.Response) {
 	return healthcheck.CheckHealthWithReasons(o.GetHealthCheckUrl())
 }
@@ -64,5 +68,5 @@ func (o *O11yagent) GetLastUpdateError() error {
 }
 
 func (o *O11yagent) Restart() error {
-	return nil
+	return o.oh.RestartService(o.GetServiceName())
 }

@@ -2,13 +2,18 @@ package application
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"math/rand"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
-	"log/slog"
-	"math/rand"
-	"sync"
-	"time"
 )
 
 type App struct {
@@ -30,6 +35,7 @@ type updaterClient interface {
 
 type oshelper interface {
 	GetSystemUptime() (time.Duration, error)
+	GetServiceUptime(serviceName string) (time.Duration, error)
 }
 
 func New(config *config.Config, client updaterClient, logger *slog.Logger, agents []agents.AgentData, oh oshelper) *App {
@@ -45,6 +51,9 @@ func (s *App) poll(agent agents.AgentData) {
 		return
 	}
 	s.logger.Debug("Received response", "response", response, "agent", agent.GetServiceName())
+
+	s.processFeatureFlags(response, agent)
+
 	if response.Action == agentmanager.Action_UPDATE {
 		s.Update(response, agent)
 	}
@@ -80,6 +89,83 @@ func (s *App) Restart(agent agents.AgentData) {
 	if err != nil {
 		s.logger.Error("Failed to restart agent", "error", err)
 		return
+	}
+}
+
+func generateEnvironmentFileContent(featureFlags map[string]string) string {
+	var sb strings.Builder
+	sb.WriteString("# Configuration file for nebius-observability-agent.\n")
+	sb.WriteString("# This file is managed by the agent updater process.\n")
+	sb.WriteString("# Variables defined here are loaded as environment variables at agent startup.\n")
+
+	if len(featureFlags) == 0 {
+		return sb.String()
+	}
+
+	keys := make([]string, 0, len(featureFlags))
+	for k := range featureFlags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		sb.WriteString(fmt.Sprintf("%s=%s\n", k, featureFlags[k]))
+	}
+	return sb.String()
+}
+
+func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, agent agents.AgentData) {
+	envPath := agent.GetEnvironmentFilePath()
+	if envPath == "" {
+		return
+	}
+
+	featureFlags := response.GetFeatureFlags()
+	newContent := generateEnvironmentFileContent(featureFlags)
+
+	existingContent, err := os.ReadFile(envPath)
+	if err != nil && !os.IsNotExist(err) {
+		s.logger.Error("Failed to read environment file", "error", err, "path", envPath)
+		return
+	}
+
+	if string(existingContent) != newContent {
+		s.logger.Info("Feature flags changed, updating environment file", "agent", agent.GetServiceName(), "path", envPath)
+		if err := os.WriteFile(envPath, []byte(newContent), 0640); err != nil {
+			s.logger.Error("Failed to write environment file", "error", err, "path", envPath)
+			return
+		}
+	}
+
+	// Check if agent needs restart: env file was modified after agent started.
+	// This covers both the case where we just wrote the file above and the case
+	// where a previous run wrote the file but couldn't restart (crash, uptime < 15 min).
+	fileInfo, err := os.Stat(envPath)
+	if err != nil {
+		s.logger.Error("Failed to stat environment file", "error", err, "path", envPath)
+		return
+	}
+
+	agentUptime, err := s.oh.GetServiceUptime(agent.GetServiceName())
+	if err != nil {
+		s.logger.Error("Failed to get agent uptime", "error", err)
+		return
+	}
+
+	agentStartTime := time.Now().Add(-agentUptime)
+	if !fileInfo.ModTime().After(agentStartTime) {
+		return
+	}
+
+	if agentUptime < MinimalUptimeForUpdate {
+		s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
+			"agent_uptime", agentUptime.String(), "agent", agent.GetServiceName())
+		return
+	}
+
+	s.logger.Info("Restarting agent due to feature flags change", "agent", agent.GetServiceName())
+	if err := agent.Restart(); err != nil {
+		s.logger.Error("Failed to restart agent after feature flags change", "error", err, "agent", agent.GetServiceName())
 	}
 }
 

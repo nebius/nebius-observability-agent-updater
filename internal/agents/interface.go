@@ -9,6 +9,7 @@ type AgentData interface {
 	GetAgentType() agentmanager.AgentType
 	GetDebPackageName() string
 	GetServiceName() string
+	GetEnvironmentFilePath() string
 	IsAgentHealthy() (bool, healthcheck.Response)
 	Update(updateRepoScriptPath string, version string) error
 	GetLastUpdateError() error

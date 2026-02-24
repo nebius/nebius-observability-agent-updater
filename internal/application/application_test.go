@@ -3,18 +3,19 @@ package application
 import (
 	"context"
 	"errors"
-	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
-	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"io"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
+	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/goleak"
-	"log/slog"
 )
 
 type MockUpdaterClient struct {
@@ -66,6 +67,11 @@ func (m *MockAgentData) GetLastUpdateError() error {
 	return nil
 }
 
+func (m *MockAgentData) GetEnvironmentFilePath() string {
+	args := m.Called()
+	return args.String(0)
+}
+
 func (m *MockAgentData) Restart() error {
 	args := m.Called()
 	return args.Error(0)
@@ -78,6 +84,11 @@ type MockOSHelper struct {
 
 func (m *MockOSHelper) GetSystemUptime() (time.Duration, error) {
 	args := m.Called()
+	return args.Get(0).(time.Duration), args.Error(1)
+}
+
+func (m *MockOSHelper) GetServiceUptime(serviceName string) (time.Duration, error) {
+	args := m.Called(serviceName)
 	return args.Get(0).(time.Duration), args.Error(1)
 }
 
@@ -109,6 +120,7 @@ func TestApp_poll(t *testing.T) {
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
 			},
 			expectedLogMsg: "Polling for ",
 		},
@@ -120,6 +132,7 @@ func TestApp_poll(t *testing.T) {
 					Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
 				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
 				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
 			},
@@ -132,6 +145,7 @@ func TestApp_poll(t *testing.T) {
 					Action: agentmanager.Action_RESTART,
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
 				agent.On("Restart").Return(nil)
 			},
 			expectedLogMsg: "Polling for ",
@@ -302,6 +316,7 @@ func TestApp_Run(t *testing.T) {
 	oh := &MockOSHelper{}
 
 	agent.On("GetServiceName").Return("test-agent")
+	agent.On("GetEnvironmentFilePath").Return("")
 	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 
 	app := New(cfg, client, logger, []agents.AgentData{agent}, oh)
@@ -320,4 +335,191 @@ func TestApp_Shutdown(t *testing.T) {
 	app := &App{}
 	err := app.Shutdown()
 	assert.NoError(t, err)
+}
+
+func TestGenerateEnvironmentFileContent(t *testing.T) {
+	header := "# Configuration file for nebius-observability-agent.\n" +
+		"# This file is managed by the agent updater process.\n" +
+		"# Variables defined here are loaded as environment variables at agent startup.\n"
+
+	tests := []struct {
+		name     string
+		flags    map[string]string
+		expected string
+	}{
+		{
+			name:     "nil flags",
+			flags:    nil,
+			expected: header,
+		},
+		{
+			name:     "empty flags",
+			flags:    map[string]string{},
+			expected: header,
+		},
+		{
+			name:  "single flag",
+			flags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
+			expected: header +
+				"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED=true\n",
+		},
+		{
+			name: "multiple flags sorted",
+			flags: map[string]string{
+				"FEATURE_FLAG_Z_LAST":  "false",
+				"FEATURE_FLAG_A_FIRST": "true",
+			},
+			expected: header +
+				"FEATURE_FLAG_A_FIRST=true\n" +
+				"FEATURE_FLAG_Z_LAST=false\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateEnvironmentFileContent(tt.flags)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestApp_processFeatureFlags(t *testing.T) {
+	header := "# Configuration file for nebius-observability-agent.\n" +
+		"# This file is managed by the agent updater process.\n" +
+		"# Variables defined here are loaded as environment variables at agent startup.\n"
+
+	t.Run("empty env path skips processing", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		agent.On("GetEnvironmentFilePath").Return("")
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("write new feature flags file and restart", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		agent.On("Restart").Return(nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
+		}, agent)
+
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED=true\n", string(content))
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no restart when agent uptime less than 15 minutes", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FLAG=true\n", string(content))
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no restart when content unchanged and file older than agent", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		// Write the file with old mtime (before agent start)
+		content := header + "FLAG=true\n"
+		err := os.WriteFile(envPath, []byte(content), 0640)
+		assert.NoError(t, err)
+		oldTime := time.Now().Add(-1 * time.Hour)
+		err = os.Chtimes(envPath, oldTime, oldTime)
+		assert.NoError(t, err)
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		// Agent started 30 min ago, file mtime is 1 hour ago → no restart needed
+		oh.On("GetServiceUptime", "test-agent").Return(30*time.Minute, nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("pending restart after previous crash", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		// File was written recently (simulating a previous run that wrote but didn't restart)
+		content := header + "FLAG=true\n"
+		err := os.WriteFile(envPath, []byte(content), 0640)
+		assert.NoError(t, err)
+		// File mtime is now (just written), agent started 20 min ago → file is newer → restart
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		agent.On("Restart").Return(nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("pending restart deferred when agent uptime less than 15 minutes", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		// File was written 10 minutes ago, agent started 5 minutes ago → file is newer but uptime too low
+		content := header + "FLAG=true\n"
+		err := os.WriteFile(envPath, []byte(content), 0640)
+		assert.NoError(t, err)
+		tenMinAgo := time.Now().Add(-10 * time.Minute)
+		err = os.Chtimes(envPath, tenMinAgo, tenMinAgo)
+		assert.NoError(t, err)
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
 }
