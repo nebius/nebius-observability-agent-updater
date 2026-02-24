@@ -472,16 +472,47 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.AssertExpectations(t)
 	})
 
+	t.Run("no spurious restart when file mtime within grace period of agent start", func(t *testing.T) {
+		// Reproduces the bug: write+restart in same cycle, next poll sees file mtime
+		// very close to agent start due to uptime rounding, and falsely triggers restart.
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		// File written at T, agent restarted at ~T+1s, now agent has 45s uptime.
+		// File mtime is ~46s ago, agent start is ~45s ago → within grace period → no restart.
+		content := header + "FLAG=true\n"
+		err := os.WriteFile(envPath, []byte(content), 0640)
+		assert.NoError(t, err)
+		err = os.Chtimes(envPath, time.Now().Add(-46*time.Second), time.Now().Add(-46*time.Second))
+		assert.NoError(t, err)
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(45*time.Second, nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
 	t.Run("pending restart after previous crash", func(t *testing.T) {
 		agent := &MockAgentData{}
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		// File was written recently (simulating a previous run that wrote but didn't restart)
+		// Previous updater run wrote file 5 min ago, then crashed before restarting.
+		// Agent has been running for 20 min (started before file was written).
+		// File mtime (5 min ago) is well after agent start + grace period → restart.
 		content := header + "FLAG=true\n"
 		err := os.WriteFile(envPath, []byte(content), 0640)
 		assert.NoError(t, err)
-		// File mtime is now (just written), agent started 20 min ago → file is newer → restart
+		err = os.Chtimes(envPath, time.Now().Add(-5*time.Minute), time.Now().Add(-5*time.Minute))
+		assert.NoError(t, err)
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")

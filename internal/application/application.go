@@ -26,6 +26,11 @@ type App struct {
 
 const (
 	MinimalUptimeForUpdate = 15 * time.Minute
+	// restartGracePeriod accounts for the delay between writing the environment file
+	// and the agent process actually starting after systemctl restart, plus uptime
+	// rounding errors (~1s). Without this, the next poll after a write+restart can
+	// falsely conclude the file is newer than the agent and trigger a spurious restart.
+	restartGracePeriod = 30 * time.Second
 )
 
 type updaterClient interface {
@@ -152,8 +157,13 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		return
 	}
 
+	// Use a grace period when comparing file mtime to agent start time.
+	// When we write the file and restart in the same poll cycle, the file mtime and
+	// agent start time are within ~1 second of each other. Uptime rounding (to seconds)
+	// can make the calculated start time slightly earlier than the actual start, causing
+	// the mtime to falsely appear newer than the agent start on the next poll.
 	agentStartTime := time.Now().Add(-agentUptime)
-	if !fileInfo.ModTime().After(agentStartTime) {
+	if !fileInfo.ModTime().After(agentStartTime.Add(restartGracePeriod)) {
 		return
 	}
 
