@@ -157,20 +157,32 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		return
 	}
 
-	// Use a grace period when comparing file mtime to agent start time.
-	// When we write the file and restart in the same poll cycle, the file mtime and
-	// agent start time are within ~1 second of each other. Uptime rounding (to seconds)
-	// can make the calculated start time slightly earlier than the actual start, causing
-	// the mtime to falsely appear newer than the agent start on the next poll.
-	agentStartTime := time.Now().Add(-agentUptime)
-	if !fileInfo.ModTime().After(agentStartTime.Add(restartGracePeriod)) {
-		return
-	}
+	systemUptime, sysErr := s.oh.GetSystemUptime()
+	freshBoot := sysErr == nil && systemUptime < restartGracePeriod
 
-	if agentUptime < MinimalUptimeForUpdate {
-		s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
-			"agent_uptime", agentUptime.String(), "agent", agent.GetServiceName())
-		return
+	agentStartTime := time.Now().Add(-agentUptime)
+
+	if freshBoot {
+		// On fresh boot, both the file and agent were just created. Skip the grace
+		// period and the 15-minute uptime check so feature flags are applied immediately.
+		if !fileInfo.ModTime().After(agentStartTime) {
+			return
+		}
+	} else {
+		// Use a grace period when comparing file mtime to agent start time.
+		// When we write the file and restart in the same poll cycle, the file mtime and
+		// agent start time are within ~1 second of each other. Uptime rounding (to seconds)
+		// can make the calculated start time slightly earlier than the actual start, causing
+		// the mtime to falsely appear newer than the agent start on the next poll.
+		if !fileInfo.ModTime().After(agentStartTime.Add(restartGracePeriod)) {
+			return
+		}
+
+		if agentUptime < MinimalUptimeForUpdate {
+			s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
+				"agent_uptime", agentUptime.String(), "agent", agent.GetServiceName())
+			return
+		}
 	}
 
 	s.logger.Info("Restarting agent due to feature flags change", "agent", agent.GetServiceName())

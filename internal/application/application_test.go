@@ -410,6 +410,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 		agent.On("Restart").Return(nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
@@ -432,6 +433,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
 		app.processFeatureFlags(&agentmanager.GetVersionResponse{
@@ -462,6 +464,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetServiceName").Return("test-agent")
 		// Agent started 30 min ago, file mtime is 1 hour ago → no restart needed
 		oh.On("GetServiceUptime", "test-agent").Return(30*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(2*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
 		app.processFeatureFlags(&agentmanager.GetVersionResponse{
@@ -490,6 +493,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(45*time.Second, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
 		app.processFeatureFlags(&agentmanager.GetVersionResponse{
@@ -497,6 +501,30 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		}, agent)
 
 		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("fresh boot restarts agent immediately even with low uptime", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		// Agent uptime 10s, system uptime 15s (fresh boot)
+		oh.On("GetServiceUptime", "test-agent").Return(10*time.Second, nil)
+		oh.On("GetSystemUptime").Return(15*time.Second, nil)
+		agent.On("Restart").Return(nil)
+
+		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FLAG=true\n", string(content))
+		agent.AssertExpectations(t)
 		oh.AssertExpectations(t)
 	})
 
@@ -517,6 +545,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 		agent.On("Restart").Return(nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
@@ -544,6 +573,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
 		app.processFeatureFlags(&agentmanager.GetVersionResponse{
