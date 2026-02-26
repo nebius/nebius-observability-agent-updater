@@ -180,12 +180,13 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 
 		if agentUptime < MinimalUptimeForUpdate {
 			s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
-				"agent_uptime", agentUptime.String(), "agent", agent.GetServiceName())
+				"agent_uptime", agentUptime.String(), "system_uptime", systemUptime.String(), "agent", agent.GetServiceName())
 			return
 		}
 	}
 
-	s.logger.Info("Restarting agent due to feature flags change", "agent", agent.GetServiceName())
+	s.logger.Info("Restarting agent due to feature flags change",
+		"agent", agent.GetServiceName(), "agent_uptime", agentUptime.String(), "system_uptime", systemUptime.String())
 	if err := agent.Restart(); err != nil {
 		s.logger.Error("Failed to restart agent after feature flags change", "error", err, "agent", agent.GetServiceName())
 	}
