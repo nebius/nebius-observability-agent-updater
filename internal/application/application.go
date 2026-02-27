@@ -158,7 +158,7 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 	}
 
 	systemUptime, sysErr := s.oh.GetSystemUptime()
-	freshBoot := sysErr == nil && systemUptime < restartGracePeriod
+	freshBoot := sysErr == nil && systemUptime < MinimalUptimeForUpdate
 
 	agentStartTime := time.Now().Add(-agentUptime)
 

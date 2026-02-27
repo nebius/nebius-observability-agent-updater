@@ -511,9 +511,9 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
-		// Agent uptime 10s, system uptime 15s (fresh boot)
-		oh.On("GetServiceUptime", "test-agent").Return(10*time.Second, nil)
-		oh.On("GetSystemUptime").Return(15*time.Second, nil)
+		// Agent uptime 13m54s, system uptime 14m21s (fresh boot, under 15 min)
+		oh.On("GetServiceUptime", "test-agent").Return(13*time.Minute+54*time.Second, nil)
+		oh.On("GetSystemUptime").Return(14*time.Minute+21*time.Second, nil)
 		agent.On("Restart").Return(nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
