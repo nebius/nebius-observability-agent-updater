@@ -29,10 +29,7 @@ type App struct {
 
 const (
 	MinimalUptimeForUpdate = 15 * time.Minute
-	// restartGracePeriod accounts for the delay between writing the environment file
-	// and the agent process actually starting after systemctl restart, plus uptime
-	// rounding errors (~1s). Without this, the next poll after a write+restart can
-	// falsely conclude the file is newer than the agent and trigger a spurious restart.
+	// restartGracePeriod prevents spurious restarts when file mtime is close to agent start time.
 	restartGracePeriod = 30 * time.Second
 )
 
@@ -102,9 +99,7 @@ func (s *App) Restart(agent agents.AgentData) {
 
 func generateEnvironmentFileContent(featureFlags map[string]string) string {
 	var sb strings.Builder
-	sb.WriteString("# Configuration file for nebius-observability-agent.\n")
-	sb.WriteString("# This file is managed by the agent updater process.\n")
-	sb.WriteString("# Variables defined here are loaded as environment variables at agent startup.\n")
+	sb.WriteString("# Managed by agent updater. Variables are loaded as env vars at agent startup.\n")
 
 	if len(featureFlags) == 0 {
 		return sb.String()
@@ -117,7 +112,7 @@ func generateEnvironmentFileContent(featureFlags map[string]string) string {
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		sb.WriteString(fmt.Sprintf("%s=%s\n", k, featureFlags[k]))
+		fmt.Fprintf(&sb, "%s=%s\n", k, featureFlags[k])
 	}
 	return sb.String()
 }
@@ -164,9 +159,6 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		}
 	}
 
-	// Check if agent needs restart: env file was modified after agent started.
-	// This covers both the case where we just wrote the file above and the case
-	// where a previous run wrote the file but couldn't restart (crash, uptime < 15 min).
 	fileInfo, err := os.Stat(envPath)
 	if err != nil {
 		s.logger.Error("Failed to stat environment file", "error", err, "path", envPath)
@@ -181,30 +173,22 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 
 	systemUptime, sysErr := s.oh.GetSystemUptime()
 	freshBoot := sysErr == nil && systemUptime < MinimalUptimeForUpdate
-
 	agentStartTime := time.Now().Add(-agentUptime)
 
+	gracePeriod := restartGracePeriod
+	requireMinUptime := true
 	if freshBoot {
-		// On fresh boot, both the file and agent were just created. Skip the grace
-		// period and the 15-minute uptime check so feature flags are applied immediately.
-		if !fileInfo.ModTime().After(agentStartTime) {
-			return false
-		}
-	} else {
-		// Use a grace period when comparing file mtime to agent start time.
-		// When we write the file and restart in the same poll cycle, the file mtime and
-		// agent start time are within ~1 second of each other. Uptime rounding (to seconds)
-		// can make the calculated start time slightly earlier than the actual start, causing
-		// the mtime to falsely appear newer than the agent start on the next poll.
-		if !fileInfo.ModTime().After(agentStartTime.Add(restartGracePeriod)) {
-			return false
-		}
+		gracePeriod = 0
+		requireMinUptime = false
+	}
 
-		if agentUptime < MinimalUptimeForUpdate {
-			s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
-				"agent_uptime", agentUptime.String(), "system_uptime", systemUptime.String(), "agent", agent.GetServiceName())
-			return false
-		}
+	if !fileInfo.ModTime().After(agentStartTime.Add(gracePeriod)) {
+		return false
+	}
+	if requireMinUptime && agentUptime < MinimalUptimeForUpdate {
+		s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
+			"agent_uptime", agentUptime.String(), "system_uptime", systemUptime.String(), "agent", agent.GetServiceName())
+		return false
 	}
 
 	s.logger.Info("Restarting agent due to feature flags change",

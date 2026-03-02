@@ -77,7 +77,6 @@ func (m *MockAgentData) Restart() error {
 	return args.Error(0)
 }
 
-// New mock for OSHelper
 type MockOSHelper struct {
 	mock.Mock
 }
@@ -338,9 +337,7 @@ func TestApp_Shutdown(t *testing.T) {
 }
 
 func TestGenerateEnvironmentFileContent(t *testing.T) {
-	header := "# Configuration file for nebius-observability-agent.\n" +
-		"# This file is managed by the agent updater process.\n" +
-		"# Variables defined here are loaded as environment variables at agent startup.\n"
+	header := "# Managed by agent updater. Variables are loaded as env vars at agent startup.\n"
 
 	tests := []struct {
 		name     string
@@ -384,9 +381,7 @@ func TestGenerateEnvironmentFileContent(t *testing.T) {
 }
 
 func TestApp_processFeatureFlags(t *testing.T) {
-	header := "# Configuration file for nebius-observability-agent.\n" +
-		"# This file is managed by the agent updater process.\n" +
-		"# Variables defined here are loaded as environment variables at agent startup.\n"
+	header := "# Managed by agent updater. Variables are loaded as env vars at agent startup.\n"
 
 	t.Run("empty env path skips processing", func(t *testing.T) {
 		agent := &MockAgentData{}
@@ -455,7 +450,6 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		// Write the file with old mtime (before agent start)
 		content := header + "FLAG=true\n"
 		err := os.WriteFile(envPath, []byte(content), 0640)
 		assert.NoError(t, err)
@@ -465,7 +459,6 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
-		// Agent started 30 min ago, file mtime is 1 hour ago → no restart needed
 		oh.On("GetServiceUptime", "test-agent").Return(30*time.Minute, nil)
 		oh.On("GetSystemUptime").Return(2*time.Hour, nil)
 
@@ -480,14 +473,10 @@ func TestApp_processFeatureFlags(t *testing.T) {
 	})
 
 	t.Run("no spurious restart when file mtime within grace period of agent start", func(t *testing.T) {
-		// Reproduces the bug: write+restart in same cycle, next poll sees file mtime
-		// very close to agent start due to uptime rounding, and falsely triggers restart.
 		agent := &MockAgentData{}
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		// File written at T, agent restarted at ~T+1s, now agent has 45s uptime.
-		// File mtime is ~46s ago, agent start is ~45s ago → within grace period → no restart.
 		content := header + "FLAG=true\n"
 		err := os.WriteFile(envPath, []byte(content), 0640)
 		assert.NoError(t, err)
@@ -516,7 +505,6 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
-		// Agent uptime 13m54s, system uptime 14m21s (fresh boot, under 15 min)
 		oh.On("GetServiceUptime", "test-agent").Return(13*time.Minute+54*time.Second, nil)
 		oh.On("GetSystemUptime").Return(14*time.Minute+21*time.Second, nil)
 		agent.On("Restart").Return(nil)
@@ -539,9 +527,6 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		// Previous updater run wrote file 5 min ago, then crashed before restarting.
-		// Agent has been running for 20 min (started before file was written).
-		// File mtime (5 min ago) is well after agent start + grace period → restart.
 		content := header + "FLAG=true\n"
 		err := os.WriteFile(envPath, []byte(content), 0640)
 		assert.NoError(t, err)
@@ -569,7 +554,6 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		// File was written 10 minutes ago, agent started 5 minutes ago → file is newer but uptime too low
 		content := header + "FLAG=true\n"
 		err := os.WriteFile(envPath, []byte(content), 0640)
 		assert.NoError(t, err)
@@ -658,8 +642,6 @@ func TestApp_validateFeatureFlags(t *testing.T) {
 }
 
 func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
-	// When RESTART action arrives and processFeatureFlags already restarted
-	// the agent (due to feature flag change), poll() should NOT call Restart() again.
 	client := &MockUpdaterClient{}
 	agent := &MockAgentData{}
 	oh := &MockOSHelper{}
@@ -673,7 +655,6 @@ func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
 	agent.On("GetEnvironmentFilePath").Return(envPath)
 	oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
-	// Restart should be called exactly once (by processFeatureFlags), not twice
 	agent.On("Restart").Return(nil).Once()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

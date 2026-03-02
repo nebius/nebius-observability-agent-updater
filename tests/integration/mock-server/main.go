@@ -74,7 +74,8 @@ func main() {
 	svc := newMockVersionService()
 
 	// Start gRPC server
-	grpcLis, err := net.Listen("tcp", ":50051")
+	var lc net.ListenConfig
+	grpcLis, err := lc.Listen(context.Background(), "tcp", ":50051")
 	if err != nil {
 		log.Fatalf("failed to listen on :50051: %v", err)
 	}
@@ -127,7 +128,7 @@ func main() {
 			jsonReqs = append(jsonReqs, data)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jsonReqs)
+		_ = json.NewEncoder(w).Encode(jsonReqs)
 	})
 
 	mux.HandleFunc("/api/request/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +147,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
+		_, _ = w.Write(data)
 	})
 
 	mux.HandleFunc("/api/clear", func(w http.ResponseWriter, r *http.Request) {

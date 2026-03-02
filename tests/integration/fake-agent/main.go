@@ -50,7 +50,9 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, fmt.Sprintf("encode: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func main() {
