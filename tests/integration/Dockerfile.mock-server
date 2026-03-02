@@ -1,0 +1,15 @@
+FROM golang:1.24-bookworm AS builder
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o mock-server ./tests/integration/mock-server/
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /build/mock-server /usr/local/bin/mock-server
+EXPOSE 50051 8080
+HEALTHCHECK --interval=5s --timeout=3s --retries=5 --start-period=5s \
+    CMD nc -z localhost 50051 || exit 1
+CMD ["/usr/local/bin/mock-server"]
