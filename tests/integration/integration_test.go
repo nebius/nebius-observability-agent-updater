@@ -64,8 +64,7 @@ func (s *UpdaterSuite) TestFeatureFlagsWritten() {
 
 // Uses RESTART action to bypass the 15-min uptime gate for feature-flag restarts.
 func (s *UpdaterSuite) TestFeatureFlagsRestartAgent() {
-	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID")
+	pidBefore := s.getAgentPID()
 	s.T().Logf("Fake-agent PID before: %s", pidBefore)
 	require.NotEqual(s.T(), "0", pidBefore, "Fake-agent should be running")
 
@@ -86,8 +85,7 @@ func (s *UpdaterSuite) TestFeatureFlagsRestartAgent() {
 	require.NoError(s.T(), err, "Should be able to read environment file")
 	assert.Contains(s.T(), content, "RESTART_TEST_FLAG="+flagValue, "Environment file should contain the new flag")
 
-	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID after restart")
+	pidAfter := s.getAgentPID()
 	s.T().Logf("Fake-agent PID after: %s", pidAfter)
 	require.NotEqual(s.T(), "0", pidAfter, "Fake-agent should still be running")
 
@@ -102,8 +100,7 @@ func (s *UpdaterSuite) TestFeatureFlagsRestartAgent() {
 }
 
 func (s *UpdaterSuite) TestRestartAction() {
-	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID")
+	pidBefore := s.getAgentPID()
 	s.T().Logf("Fake-agent PID before: %s", pidBefore)
 	require.NotEqual(s.T(), "0", pidBefore, "Fake-agent should be running")
 
@@ -116,8 +113,7 @@ func (s *UpdaterSuite) TestRestartAction() {
 	s.T().Log("Waiting for updater to poll and restart agent...")
 	time.Sleep(8 * time.Second)
 
-	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID after restart")
+	pidAfter := s.getAgentPID()
 	s.T().Logf("Fake-agent PID after: %s", pidAfter)
 	require.NotEqual(s.T(), "0", pidAfter, "Fake-agent should still be running")
 
@@ -144,8 +140,7 @@ func (s *UpdaterSuite) TestFreshBootFeatureFlagsRestart() {
 		},
 	})
 
-	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID")
+	pidBefore := s.getAgentPID()
 	s.T().Logf("Fake-agent PID before: %s", pidBefore)
 	require.NotEqual(s.T(), "0", pidBefore, "Fake-agent should be running")
 
@@ -165,8 +160,7 @@ func (s *UpdaterSuite) TestFreshBootFeatureFlagsRestart() {
 	require.NoError(s.T(), err, "Should be able to read environment file")
 	assert.Contains(s.T(), content, "FRESH_BOOT_FLAG="+flagValue, "Environment file should contain the fresh boot flag")
 
-	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID after restart")
+	pidAfter := s.getAgentPID()
 	s.T().Logf("Fake-agent PID after: %s", pidAfter)
 	require.NotEqual(s.T(), "0", pidAfter, "Fake-agent should still be running")
 
@@ -200,8 +194,7 @@ func (s *UpdaterSuite) TestFeatureFlagRemoval() {
 	assert.Contains(s.T(), content, "REMOVE_FLAG_B=2")
 
 	s.clearMock()
-	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err)
+	pidBefore := s.getAgentPID()
 	require.NotEqual(s.T(), "0", pidBefore)
 
 	s.setMockResponse(&agentmanager.GetVersionResponse{
@@ -219,8 +212,7 @@ func (s *UpdaterSuite) TestFeatureFlagRemoval() {
 	assert.Contains(s.T(), content, "REMOVE_FLAG_A=1")
 	assert.NotContains(s.T(), content, "REMOVE_FLAG_B")
 
-	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err)
+	pidAfter := s.getAgentPID()
 	require.NotEqual(s.T(), "0", pidAfter)
 	assert.NotEqual(s.T(), pidBefore, pidAfter, "Agent should have restarted after flag removal")
 
@@ -261,8 +253,7 @@ func (s *UpdaterSuite) TestFeatureFlagValidation() {
 func (s *UpdaterSuite) TestRestartWithFeatureFlagChangeIsStable() {
 	s.clearMock()
 
-	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err)
+	pidBefore := s.getAgentPID()
 	require.NotEqual(s.T(), "0", pidBefore)
 
 	flagValue := "stable_" + time.Now().Format("150405")
@@ -276,8 +267,7 @@ func (s *UpdaterSuite) TestRestartWithFeatureFlagChangeIsStable() {
 	s.T().Log("Waiting for restart with new feature flag...")
 	time.Sleep(8 * time.Second)
 
-	pidAfterRestart, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err)
+	pidAfterRestart := s.getAgentPID()
 	require.NotEqual(s.T(), "0", pidAfterRestart)
 	assert.NotEqual(s.T(), pidBefore, pidAfterRestart, "Agent should have restarted")
 
@@ -295,8 +285,7 @@ func (s *UpdaterSuite) TestRestartWithFeatureFlagChangeIsStable() {
 	s.T().Log("Waiting for two more poll cycles to verify stability...")
 	time.Sleep(8 * time.Second)
 
-	pidAfterStable, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err)
+	pidAfterStable := s.getAgentPID()
 	assert.Equal(s.T(), pidAfterRestart, pidAfterStable, "Agent PID should NOT change after switching to NOP with same flags")
 }
 
@@ -350,16 +339,14 @@ func (s *UpdaterSuite) TestNopKeepsAgentRunning() {
 
 	time.Sleep(6 * time.Second)
 
-	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID")
+	pidBefore := s.getAgentPID()
 	s.T().Logf("Fake-agent PID before: %s", pidBefore)
 	require.NotEqual(s.T(), "0", pidBefore, "Fake-agent should be running")
 
 	s.T().Log("Waiting for 2 poll cycles...")
 	time.Sleep(8 * time.Second)
 
-	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
-	require.NoError(s.T(), err, "Should get fake-agent PID")
+	pidAfter := s.getAgentPID()
 	s.T().Logf("Fake-agent PID after: %s", pidAfter)
 
 	assert.Equal(s.T(), pidBefore, pidAfter, "Fake-agent PID should NOT have changed with NOP action")

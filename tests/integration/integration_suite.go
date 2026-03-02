@@ -162,27 +162,34 @@ func (s *UpdaterSuite) buildDebPackage() error {
 	return nil
 }
 
-func (s *UpdaterSuite) startDockerCompose() error {
+func dockerComposeCmd(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	testDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 	projectRoot := testDir + "/../.."
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
+	baseArgs := []string{"-f", "tests/integration/docker-compose.yml"}
+	baseArgs = append(baseArgs, args...)
 
 	var cmd *exec.Cmd
 	if _, err := exec.LookPath("docker-compose"); err == nil {
-		cmd = exec.CommandContext(ctx, "docker-compose",
-			"-f", "tests/integration/docker-compose.yml",
-			"up", "-d", "--build")
+		cmd = exec.CommandContext(ctx, "docker-compose", baseArgs...)
 	} else {
-		cmd = exec.CommandContext(ctx, "docker", "compose",
-			"-f", "tests/integration/docker-compose.yml",
-			"up", "-d", "--build")
+		cmd = exec.CommandContext(ctx, "docker", append([]string{"compose"}, baseArgs...)...)
 	}
 	cmd.Dir = projectRoot
+	return cmd, nil
+}
+
+func (s *UpdaterSuite) startDockerCompose() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	cmd, err := dockerComposeCmd(ctx, "up", "-d", "--build")
+	if err != nil {
+		return err
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -196,21 +203,10 @@ func (s *UpdaterSuite) startDockerCompose() error {
 }
 
 func (s *UpdaterSuite) stopDockerCompose() error {
-	testDir, err := os.Getwd()
+	cmd, err := dockerComposeCmd(context.Background(), "down")
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return err
 	}
-	projectRoot := testDir + "/../.."
-
-	var cmd *exec.Cmd
-	if _, err := exec.LookPath("docker-compose"); err == nil {
-		cmd = exec.CommandContext(context.Background(), "docker-compose",
-			"-f", "tests/integration/docker-compose.yml", "down")
-	} else {
-		cmd = exec.CommandContext(context.Background(), "docker", "compose",
-			"-f", "tests/integration/docker-compose.yml", "down")
-	}
-	cmd.Dir = projectRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to stop docker-compose: %w\nOutput: %s", err, output)
@@ -356,6 +352,12 @@ func (s *UpdaterSuite) execInContainer(cmdArgs ...string) (string, error) {
 
 func (s *UpdaterSuite) readFileInContainer(path string) (string, error) {
 	return s.execInContainer("cat", path)
+}
+
+func (s *UpdaterSuite) getAgentPID() string {
+	pid, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
+	require.NoError(s.T(), err, "Should get fake-agent PID")
+	return pid
 }
 
 func (s *UpdaterSuite) setMockResponse(resp *agentmanager.GetVersionResponse) {

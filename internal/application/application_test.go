@@ -91,6 +91,23 @@ func (m *MockOSHelper) GetServiceUptime(serviceName string) (time.Duration, erro
 	return args.Get(0).(time.Duration), args.Error(1)
 }
 
+func newTestApp(client updaterClient, oh oshelper) *App {
+	return &App{
+		client: client,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config: config.GetDefaultConfig(),
+		oh:     oh,
+	}
+}
+
+func writeEnvFile(t *testing.T, path, content string, mtime time.Time) {
+	t.Helper()
+	err := os.WriteFile(path, []byte(content), 0640)
+	assert.NoError(t, err)
+	err = os.Chtimes(path, mtime, mtime)
+	assert.NoError(t, err)
+}
+
 func TestApp_New(t *testing.T) {
 	cfg := &config.Config{}
 	client := &MockUpdaterClient{}
@@ -166,13 +183,7 @@ func TestApp_poll(t *testing.T) {
 			oh := &MockOSHelper{}
 			tt.setupMocks(client, agent, oh)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			app := &App{
-				client: client,
-				logger: logger,
-				config: config.GetDefaultConfig(),
-				oh:     oh,
-			}
+			app := newTestApp(client, oh)
 
 			app.poll(agent)
 
@@ -245,12 +256,7 @@ func TestApp_Update(t *testing.T) {
 			oh := &MockOSHelper{}
 			tt.setupMocks(agent, oh)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			app := &App{
-				logger: logger,
-				config: config.GetDefaultConfig(),
-				oh:     oh,
-			}
+			app := newTestApp(nil, oh)
 
 			app.Update(tt.response, agent)
 
@@ -289,11 +295,7 @@ func TestApp_Restart(t *testing.T) {
 			agent := &MockAgentData{}
 			tt.setupMocks(agent)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			app := &App{
-				logger: logger,
-				config: config.GetDefaultConfig(),
-			}
+			app := newTestApp(nil, nil)
 
 			app.Restart(agent)
 
@@ -388,7 +390,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		agent.On("GetEnvironmentFilePath").Return("")
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -409,7 +411,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 		agent.On("Restart").Return(nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
 		}, agent)
@@ -432,7 +434,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -450,19 +452,14 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		content := header + "FLAG=true\n"
-		err := os.WriteFile(envPath, []byte(content), 0640)
-		assert.NoError(t, err)
-		oldTime := time.Now().Add(-1 * time.Hour)
-		err = os.Chtimes(envPath, oldTime, oldTime)
-		assert.NoError(t, err)
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-1*time.Hour))
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(30*time.Minute, nil)
 		oh.On("GetSystemUptime").Return(2*time.Hour, nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -477,18 +474,14 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		content := header + "FLAG=true\n"
-		err := os.WriteFile(envPath, []byte(content), 0640)
-		assert.NoError(t, err)
-		err = os.Chtimes(envPath, time.Now().Add(-46*time.Second), time.Now().Add(-46*time.Second))
-		assert.NoError(t, err)
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-46*time.Second))
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(45*time.Second, nil)
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -509,7 +502,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(14*time.Minute+21*time.Second, nil)
 		agent.On("Restart").Return(nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -527,11 +520,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		content := header + "FLAG=true\n"
-		err := os.WriteFile(envPath, []byte(content), 0640)
-		assert.NoError(t, err)
-		err = os.Chtimes(envPath, time.Now().Add(-5*time.Minute), time.Now().Add(-5*time.Minute))
-		assert.NoError(t, err)
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-5*time.Minute))
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
@@ -539,7 +528,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 		agent.On("Restart").Return(nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -554,19 +543,14 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh := &MockOSHelper{}
 		envPath := t.TempDir() + "/environment"
 
-		content := header + "FLAG=true\n"
-		err := os.WriteFile(envPath, []byte(content), 0640)
-		assert.NoError(t, err)
-		tenMinAgo := time.Now().Add(-10 * time.Minute)
-		err = os.Chtimes(envPath, tenMinAgo, tenMinAgo)
-		assert.NoError(t, err)
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-10*time.Minute))
 
 		agent.On("GetEnvironmentFilePath").Return(envPath)
 		agent.On("GetServiceName").Return("test-agent")
 		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
-		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
+		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
@@ -578,8 +562,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 }
 
 func TestApp_validateFeatureFlags(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	app := &App{logger: logger}
+	app := newTestApp(nil, nil)
 
 	tests := []struct {
 		name     string
@@ -657,13 +640,7 @@ func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 	agent.On("Restart").Return(nil).Once()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	app := &App{
-		client: client,
-		logger: logger,
-		config: config.GetDefaultConfig(),
-		oh:     oh,
-	}
+	app := newTestApp(client, oh)
 
 	app.poll(agent)
 
