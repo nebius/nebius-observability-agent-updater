@@ -313,12 +313,13 @@ func (s *UpdaterSuite) installUpdater() {
 
 // writeTestConfig writes the test config with insecure gRPC and short poll interval.
 func (s *UpdaterSuite) writeTestConfig() {
-	configContent := `poll_interval: 5s
+	configContent := `poll_interval: 2s
 poll_jitter: 0s
 grpc:
   endpoint: ""
   insecure: true
   timeout: 5s
+update_repo_script_path: /usr/local/bin/fake-update-repo.sh
 `
 	writeCmd := fmt.Sprintf("cat > /etc/nebius-observability-agent-updater/config.yaml << 'TESTEOF'\n%sTESTEOF", configContent)
 	cmd := exec.CommandContext(context.Background(), "docker", "exec", s.containerID, "sh", "-c", writeCmd)
@@ -554,6 +555,35 @@ func (s *UpdaterSuite) copyProcPid(pid string) {
 			`}' /proc/%s/stat > /fake_proc/%s/stat 2>/dev/null || true`,
 		pid, pid, pid)
 	_, _ = s.dockerExec("sh", "-c", script)
+}
+
+// setupFakeUpdate creates fake scripts for the UPDATE action test:
+//  1. /usr/local/bin/fake-update-repo.sh — no-op (replaces real repo updater)
+//  2. /usr/local/bin/apt-get — records args to /tmp/apt-get-calls.log then exits 0
+//     (shadows real apt-get in PATH; cleaned up after)
+//
+// Returns a cleanup function that removes the fake apt-get and log file.
+func (s *UpdaterSuite) setupFakeUpdate() func() {
+	// Create the fake update-repo script (always present via config, harmless)
+	_, err := s.dockerExec("sh", "-c", `printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/fake-update-repo.sh && chmod +x /usr/local/bin/fake-update-repo.sh`)
+	require.NoError(s.T(), err, "Failed to create fake-update-repo.sh")
+
+	// Create a fake apt-get that logs calls and exits 0
+	_, err = s.dockerExec("sh", "-c", `printf '#!/bin/sh\necho "$@" >> /tmp/apt-get-calls.log\nexit 0\n' > /usr/local/bin/apt-get && chmod +x /usr/local/bin/apt-get`)
+	require.NoError(s.T(), err, "Failed to create fake apt-get")
+
+	return func() {
+		_, _ = s.dockerExec("sh", "-c", "rm -f /usr/local/bin/apt-get /tmp/apt-get-calls.log")
+	}
+}
+
+// getAptGetCalls reads /tmp/apt-get-calls.log from the container.
+func (s *UpdaterSuite) getAptGetCalls() string {
+	content, err := s.readFileInContainer("/tmp/apt-get-calls.log")
+	if err != nil {
+		return ""
+	}
+	return content
 }
 
 // printContainerLogs prints container logs for debugging.

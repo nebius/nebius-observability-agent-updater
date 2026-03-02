@@ -18,7 +18,7 @@ func TestUpdaterSuite(t *testing.T) {
 // TestUpdaterPolls verifies the updater sends requests to the mock server.
 func (s *UpdaterSuite) TestUpdaterPolls() {
 	s.T().Log("Waiting for updater to poll...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	reqs := s.getMockRequests()
 	s.T().Logf("Received %d request(s)", len(reqs))
@@ -33,7 +33,7 @@ func (s *UpdaterSuite) TestUpdaterPolls() {
 // TestHealthReporting verifies the updater reports agent health status.
 func (s *UpdaterSuite) TestHealthReporting() {
 	s.T().Log("Waiting for updater to poll with health data...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	req := s.getLatestRequest()
 	require.NotNil(s.T(), req, "Should have received at least one request")
@@ -56,7 +56,7 @@ func (s *UpdaterSuite) TestFeatureFlagsWritten() {
 	})
 
 	s.T().Log("Waiting for updater to poll and write feature flags...")
-	time.Sleep(15 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	content, err := s.readFileInContainer("/etc/nebius-observability-agent/environment")
 	require.NoError(s.T(), err, "Should be able to read environment file")
@@ -88,7 +88,7 @@ func (s *UpdaterSuite) TestFeatureFlagsRestartAgent() {
 	})
 
 	s.T().Log("Waiting for updater to poll, write flags, and restart agent...")
-	time.Sleep(15 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	// Verify flags were written
 	content, err := s.readFileInContainer("/etc/nebius-observability-agent/environment")
@@ -127,7 +127,7 @@ func (s *UpdaterSuite) TestRestartAction() {
 	})
 
 	s.T().Log("Waiting for updater to poll and restart agent...")
-	time.Sleep(15 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
 	require.NoError(s.T(), err, "Should get fake-agent PID after restart")
@@ -181,7 +181,7 @@ func (s *UpdaterSuite) TestFreshBootFeatureFlagsRestart() {
 	}
 
 	s.T().Log("Waiting for updater to poll and restart agent on fresh boot...")
-	time.Sleep(15 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	// Verify flags were written
 	content, err := s.readFileInContainer("/etc/nebius-observability-agent/environment")
@@ -196,13 +196,173 @@ func (s *UpdaterSuite) TestFreshBootFeatureFlagsRestart() {
 
 	assert.NotEqual(s.T(), pidBefore, pidAfter, "Fake-agent PID should have changed (fresh boot immediate restart)")
 
-	// Restore real uptime and reset mock
-	restore()
+	// Reset mock (uptime restored by deferred restore())
 	s.setMockResponse(&agentmanager.GetVersionResponse{
 		Action: agentmanager.Action_NOP,
 		FeatureFlags: map[string]string{
 			"FRESH_BOOT_FLAG": flagValue,
 		},
+	})
+}
+
+// TestFeatureFlagRemoval verifies that removing a previously set flag updates the
+// environment file and the agent restarts with the new set of flags.
+func (s *UpdaterSuite) TestFeatureFlagRemoval() {
+	s.clearMock()
+
+	// Step 1: set two flags
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
+		FeatureFlags: map[string]string{
+			"REMOVE_FLAG_A": "1",
+			"REMOVE_FLAG_B": "2",
+		},
+	})
+
+	s.T().Log("Waiting for both flags to be written...")
+	time.Sleep(8 * time.Second)
+
+	content, err := s.readFileInContainer("/etc/nebius-observability-agent/environment")
+	require.NoError(s.T(), err)
+	assert.Contains(s.T(), content, "REMOVE_FLAG_A=1")
+	assert.Contains(s.T(), content, "REMOVE_FLAG_B=2")
+
+	// Step 2: get PID, then remove FLAG_B and request RESTART to bypass uptime gate
+	s.clearMock()
+	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
+	require.NoError(s.T(), err)
+	require.NotEqual(s.T(), "0", pidBefore)
+
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_RESTART,
+		FeatureFlags: map[string]string{
+			"REMOVE_FLAG_A": "1",
+		},
+	})
+
+	s.T().Log("Waiting for flag removal and restart...")
+	time.Sleep(8 * time.Second)
+
+	content, err = s.readFileInContainer("/etc/nebius-observability-agent/environment")
+	require.NoError(s.T(), err)
+	assert.Contains(s.T(), content, "REMOVE_FLAG_A=1")
+	assert.NotContains(s.T(), content, "REMOVE_FLAG_B")
+
+	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
+	require.NoError(s.T(), err)
+	require.NotEqual(s.T(), "0", pidAfter)
+	assert.NotEqual(s.T(), pidBefore, pidAfter, "Agent should have restarted after flag removal")
+
+	// Reset mock
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
+		FeatureFlags: map[string]string{
+			"REMOVE_FLAG_A": "1",
+		},
+	})
+}
+
+// TestFeatureFlagValidation verifies that invalid keys/values from the server
+// are filtered out before writing the environment file.
+func (s *UpdaterSuite) TestFeatureFlagValidation() {
+	s.clearMock()
+
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
+		FeatureFlags: map[string]string{
+			"VALID_KEY": "ok",
+			"BAD KEY":   "spaces",
+			"1DIGIT":    "bad",
+			"NL_VAL":    "a\nb",
+		},
+	})
+
+	s.T().Log("Waiting for updater to process feature flags...")
+	time.Sleep(8 * time.Second)
+
+	content, err := s.readFileInContainer("/etc/nebius-observability-agent/environment")
+	require.NoError(s.T(), err)
+	s.T().Logf("Environment file content:\n%s", content)
+
+	assert.Contains(s.T(), content, "VALID_KEY=ok")
+	assert.NotContains(s.T(), content, "BAD KEY")
+	assert.NotContains(s.T(), content, "1DIGIT")
+	assert.NotContains(s.T(), content, "NL_VAL")
+}
+
+// TestRestartWithFeatureFlagChangeIsStable verifies that when RESTART action
+// arrives with new feature flags, the agent restarts once and remains stable
+// on subsequent polls (no spurious second restart).
+func (s *UpdaterSuite) TestRestartWithFeatureFlagChangeIsStable() {
+	s.clearMock()
+
+	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
+	require.NoError(s.T(), err)
+	require.NotEqual(s.T(), "0", pidBefore)
+
+	flagValue := "stable_" + time.Now().Format("150405")
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_RESTART,
+		FeatureFlags: map[string]string{
+			"STABLE_FLAG": flagValue,
+		},
+	})
+
+	s.T().Log("Waiting for restart with new feature flag...")
+	time.Sleep(8 * time.Second)
+
+	pidAfterRestart, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
+	require.NoError(s.T(), err)
+	require.NotEqual(s.T(), "0", pidAfterRestart)
+	assert.NotEqual(s.T(), pidBefore, pidAfterRestart, "Agent should have restarted")
+
+	content, err := s.readFileInContainer("/etc/nebius-observability-agent/environment")
+	require.NoError(s.T(), err)
+	assert.Contains(s.T(), content, "STABLE_FLAG="+flagValue)
+
+	// Switch to NOP with same flags — agent should stay stable
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
+		FeatureFlags: map[string]string{
+			"STABLE_FLAG": flagValue,
+		},
+	})
+
+	s.T().Log("Waiting for two more poll cycles to verify stability...")
+	time.Sleep(8 * time.Second)
+
+	pidAfterStable, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), pidAfterRestart, pidAfterStable, "Agent PID should NOT change after switching to NOP with same flags")
+}
+
+// TestUpdateAction verifies the UPDATE action calls the update script and
+// apt-get with the correct version.
+func (s *UpdaterSuite) TestUpdateAction() {
+	cleanup := s.setupFakeUpdate()
+	defer cleanup()
+
+	s.clearMock()
+
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_UPDATE,
+		Response: &agentmanager.GetVersionResponse_Update{
+			Update: &agentmanager.UpdateActionParams{
+				Version: "2.0.0-test",
+			},
+		},
+	})
+
+	s.T().Log("Waiting for updater to process UPDATE action...")
+	time.Sleep(8 * time.Second)
+
+	calls := s.getAptGetCalls()
+	s.T().Logf("apt-get calls log:\n%s", calls)
+	assert.Contains(s.T(), calls, "install --allow-downgrades -y nebius-observability-agent=2.0.0-test")
+
+	// Reset mock
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action: agentmanager.Action_NOP,
 	})
 }
 
@@ -230,7 +390,7 @@ func (s *UpdaterSuite) TestNopKeepsAgentRunning() {
 	})
 
 	// Wait a bit for any pending restarts to settle
-	time.Sleep(10 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	pidBefore, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
 	require.NoError(s.T(), err, "Should get fake-agent PID")
@@ -238,7 +398,7 @@ func (s *UpdaterSuite) TestNopKeepsAgentRunning() {
 	require.NotEqual(s.T(), "0", pidBefore, "Fake-agent should be running")
 
 	s.T().Log("Waiting for 2 poll cycles...")
-	time.Sleep(15 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	pidAfter, err := s.execInContainer("sh", "-c", "systemctl show -p MainPID nebius_observability_agent | cut -d= -f2")
 	require.NoError(s.T(), err, "Should get fake-agent PID")

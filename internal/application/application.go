@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,8 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 )
+
+var validEnvKeyRegexp = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type App struct {
 	config *config.Config
@@ -57,12 +60,12 @@ func (s *App) poll(agent agents.AgentData) {
 	}
 	s.logger.Debug("Received response", "response", response, "agent", agent.GetServiceName())
 
-	s.processFeatureFlags(response, agent)
+	restarted := s.processFeatureFlags(response, agent)
 
 	if response.Action == agentmanager.Action_UPDATE {
 		s.Update(response, agent)
 	}
-	if response.Action == agentmanager.Action_RESTART {
+	if response.Action == agentmanager.Action_RESTART && !restarted {
 		s.Restart(agent)
 	}
 }
@@ -119,26 +122,45 @@ func generateEnvironmentFileContent(featureFlags map[string]string) string {
 	return sb.String()
 }
 
-func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, agent agents.AgentData) {
+func (s *App) validateFeatureFlags(flags map[string]string) map[string]string {
+	if len(flags) == 0 {
+		return flags
+	}
+	valid := make(map[string]string, len(flags))
+	for k, v := range flags {
+		if !validEnvKeyRegexp.MatchString(k) {
+			s.logger.Warn("Skipping feature flag with invalid key", "key", k)
+			continue
+		}
+		if strings.ContainsAny(v, "\n\r") {
+			s.logger.Warn("Skipping feature flag with newline in value", "key", k)
+			continue
+		}
+		valid[k] = v
+	}
+	return valid
+}
+
+func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, agent agents.AgentData) bool {
 	envPath := agent.GetEnvironmentFilePath()
 	if envPath == "" {
-		return
+		return false
 	}
 
-	featureFlags := response.GetFeatureFlags()
+	featureFlags := s.validateFeatureFlags(response.GetFeatureFlags())
 	newContent := generateEnvironmentFileContent(featureFlags)
 
 	existingContent, err := os.ReadFile(envPath)
 	if err != nil && !os.IsNotExist(err) {
 		s.logger.Error("Failed to read environment file", "error", err, "path", envPath)
-		return
+		return false
 	}
 
 	if string(existingContent) != newContent {
 		s.logger.Info("Feature flags changed, updating environment file", "agent", agent.GetServiceName(), "path", envPath)
 		if err := os.WriteFile(envPath, []byte(newContent), 0640); err != nil {
 			s.logger.Error("Failed to write environment file", "error", err, "path", envPath)
-			return
+			return false
 		}
 	}
 
@@ -148,13 +170,13 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 	fileInfo, err := os.Stat(envPath)
 	if err != nil {
 		s.logger.Error("Failed to stat environment file", "error", err, "path", envPath)
-		return
+		return false
 	}
 
 	agentUptime, err := s.oh.GetServiceUptime(agent.GetServiceName())
 	if err != nil {
 		s.logger.Error("Failed to get agent uptime", "error", err)
-		return
+		return false
 	}
 
 	systemUptime, sysErr := s.oh.GetSystemUptime()
@@ -166,7 +188,7 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		// On fresh boot, both the file and agent were just created. Skip the grace
 		// period and the 15-minute uptime check so feature flags are applied immediately.
 		if !fileInfo.ModTime().After(agentStartTime) {
-			return
+			return false
 		}
 	} else {
 		// Use a grace period when comparing file mtime to agent start time.
@@ -175,13 +197,13 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		// can make the calculated start time slightly earlier than the actual start, causing
 		// the mtime to falsely appear newer than the agent start on the next poll.
 		if !fileInfo.ModTime().After(agentStartTime.Add(restartGracePeriod)) {
-			return
+			return false
 		}
 
 		if agentUptime < MinimalUptimeForUpdate {
 			s.logger.Info("Agent uptime is less than 15 minutes, skipping restart after feature flags change",
 				"agent_uptime", agentUptime.String(), "system_uptime", systemUptime.String(), "agent", agent.GetServiceName())
-			return
+			return false
 		}
 	}
 
@@ -189,7 +211,9 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		"agent", agent.GetServiceName(), "agent_uptime", agentUptime.String(), "system_uptime", systemUptime.String())
 	if err := agent.Restart(); err != nil {
 		s.logger.Error("Failed to restart agent after feature flags change", "error", err, "agent", agent.GetServiceName())
+		return false
 	}
+	return true
 }
 
 func (s *App) Run(ctx context.Context) error {

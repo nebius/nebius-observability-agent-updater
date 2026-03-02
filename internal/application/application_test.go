@@ -394,10 +394,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("GetEnvironmentFilePath").Return("")
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.False(t, restarted)
 		agent.AssertExpectations(t)
 		oh.AssertExpectations(t)
 	})
@@ -414,10 +415,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("Restart").Return(nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
 		}, agent)
 
+		assert.True(t, restarted)
 		content, err := os.ReadFile(envPath)
 		assert.NoError(t, err)
 		assert.Equal(t, header+"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED=true\n", string(content))
@@ -436,10 +438,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.False(t, restarted)
 		content, err := os.ReadFile(envPath)
 		assert.NoError(t, err)
 		assert.Equal(t, header+"FLAG=true\n", string(content))
@@ -467,10 +470,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(2*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.False(t, restarted)
 		agent.AssertNotCalled(t, "Restart")
 		oh.AssertExpectations(t)
 	})
@@ -496,10 +500,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.False(t, restarted)
 		agent.AssertNotCalled(t, "Restart")
 		oh.AssertExpectations(t)
 	})
@@ -517,10 +522,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("Restart").Return(nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.True(t, restarted)
 		content, err := os.ReadFile(envPath)
 		assert.NoError(t, err)
 		assert.Equal(t, header+"FLAG=true\n", string(content))
@@ -549,10 +555,11 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.On("Restart").Return(nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.True(t, restarted)
 		agent.AssertExpectations(t)
 		oh.AssertExpectations(t)
 	})
@@ -576,11 +583,110 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 
 		app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), config: config.GetDefaultConfig(), oh: oh}
-		app.processFeatureFlags(&agentmanager.GetVersionResponse{
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
 			FeatureFlags: map[string]string{"FLAG": "true"},
 		}, agent)
 
+		assert.False(t, restarted)
 		agent.AssertNotCalled(t, "Restart")
 		oh.AssertExpectations(t)
 	})
+}
+
+func TestApp_validateFeatureFlags(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	app := &App{logger: logger}
+
+	tests := []struct {
+		name     string
+		input    map[string]string
+		expected map[string]string
+	}{
+		{
+			name:     "nil flags",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "empty flags",
+			input:    map[string]string{},
+			expected: map[string]string{},
+		},
+		{
+			name:     "valid keys",
+			input:    map[string]string{"FEATURE_FLAG": "true", "_PRIVATE": "1", "a": "b"},
+			expected: map[string]string{"FEATURE_FLAG": "true", "_PRIVATE": "1", "a": "b"},
+		},
+		{
+			name:     "invalid key with space",
+			input:    map[string]string{"BAD KEY": "true", "GOOD_KEY": "val"},
+			expected: map[string]string{"GOOD_KEY": "val"},
+		},
+		{
+			name:     "invalid key starting with digit",
+			input:    map[string]string{"1BAD": "true"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "invalid key with special chars",
+			input:    map[string]string{"BAD-KEY": "true", "BAD.KEY": "false"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "newline in value",
+			input:    map[string]string{"FLAG": "line1\nline2"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "carriage return in value",
+			input:    map[string]string{"FLAG": "line1\rline2"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "mixed valid and invalid",
+			input:    map[string]string{"GOOD": "ok", "BAD KEY": "no", "ALSO_GOOD": "yes", "NL_VAL": "a\nb"},
+			expected: map[string]string{"GOOD": "ok", "ALSO_GOOD": "yes"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := app.validateFeatureFlags(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
+	// When RESTART action arrives and processFeatureFlags already restarted
+	// the agent (due to feature flag change), poll() should NOT call Restart() again.
+	client := &MockUpdaterClient{}
+	agent := &MockAgentData{}
+	oh := &MockOSHelper{}
+	envPath := t.TempDir() + "/environment"
+
+	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
+		Action:       agentmanager.Action_RESTART,
+		FeatureFlags: map[string]string{"NEW_FLAG": "true"},
+	}, nil)
+	agent.On("GetServiceName").Return("test-agent")
+	agent.On("GetEnvironmentFilePath").Return(envPath)
+	oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+	// Restart should be called exactly once (by processFeatureFlags), not twice
+	agent.On("Restart").Return(nil).Once()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	app := &App{
+		client: client,
+		logger: logger,
+		config: config.GetDefaultConfig(),
+		oh:     oh,
+	}
+
+	app.poll(agent)
+
+	client.AssertExpectations(t)
+	agent.AssertExpectations(t)
+	oh.AssertExpectations(t)
 }
