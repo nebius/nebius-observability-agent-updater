@@ -169,7 +169,8 @@ func dockerComposeCmd(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	}
 	projectRoot := testDir + "/../.."
 
-	baseArgs := []string{"-f", "tests/integration/docker-compose.yml"}
+	baseArgs := make([]string, 0, 2+len(args))
+	baseArgs = append(baseArgs, "-f", "tests/integration/docker-compose.yml")
 	baseArgs = append(baseArgs, args...)
 
 	var cmd *exec.Cmd
