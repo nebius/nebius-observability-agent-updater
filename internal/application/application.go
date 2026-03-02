@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -97,6 +98,58 @@ func (s *App) Restart(agent agents.AgentData) {
 	}
 }
 
+// atomicWriteFile writes data to a temp file in the same directory, fsyncs it,
+// then renames it to the target path so readers never see partial content.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	defer func() {
+		// Clean up temp file on any failure.
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	tmpPath = "" // rename succeeded, nothing to clean up
+	return nil
+}
+
+// needsQuoting returns true if a value contains characters that require
+// double-quoting in a systemd EnvironmentFile (spaces, quotes, backslashes,
+// or leading/trailing whitespace).
+func needsQuoting(v string) bool {
+	if v == "" {
+		return false
+	}
+	if v[0] == ' ' || v[0] == '\t' || v[len(v)-1] == ' ' || v[len(v)-1] == '\t' {
+		return true
+	}
+	return strings.ContainsAny(v, ` "'`+"`"+`\$`)
+}
+
 func generateEnvironmentFileContent(featureFlags map[string]string) string {
 	var sb strings.Builder
 	sb.WriteString("# Managed by agent updater. Variables are loaded as env vars at agent startup.\n")
@@ -112,7 +165,11 @@ func generateEnvironmentFileContent(featureFlags map[string]string) string {
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		fmt.Fprintf(&sb, "%s=%s\n", k, featureFlags[k])
+		v := featureFlags[k]
+		if needsQuoting(v) {
+			v = `"` + strings.ReplaceAll(strings.ReplaceAll(v, `\`, `\\`), `"`, `\"`) + `"`
+		}
+		fmt.Fprintf(&sb, "%s=%s\n", k, v)
 	}
 	return sb.String()
 }
@@ -146,14 +203,21 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 	newContent := generateEnvironmentFileContent(featureFlags)
 
 	existingContent, err := os.ReadFile(envPath)
+	fileExists := err == nil
 	if err != nil && !os.IsNotExist(err) {
 		s.logger.Error("Failed to read environment file", "error", err, "path", envPath)
 		return false
 	}
 
+	// No flags and no existing file — nothing to do, avoid creating a
+	// header-only file that would trigger a spurious restart.
+	if len(featureFlags) == 0 && !fileExists {
+		return false
+	}
+
 	if string(existingContent) != newContent {
 		s.logger.Info("Feature flags changed, updating environment file", "agent", agent.GetServiceName(), "path", envPath)
-		if err := os.WriteFile(envPath, []byte(newContent), 0640); err != nil {
+		if err := atomicWriteFile(envPath, []byte(newContent), 0640); err != nil {
 			s.logger.Error("Failed to write environment file", "error", err, "path", envPath)
 			return false
 		}

@@ -372,6 +372,35 @@ func TestGenerateEnvironmentFileContent(t *testing.T) {
 				"FEATURE_FLAG_A_FIRST=true\n" +
 				"FEATURE_FLAG_Z_LAST=false\n",
 		},
+		{
+			name:  "value with spaces is quoted",
+			flags: map[string]string{"FLAG": "hello world"},
+			expected: header +
+				"FLAG=\"hello world\"\n",
+		},
+		{
+			name:  "value with double quote is escaped",
+			flags: map[string]string{"FLAG": `say "hi"`},
+			expected: header +
+				`FLAG="say \"hi\""` + "\n",
+		},
+		{
+			name:  "value with backslash is escaped",
+			flags: map[string]string{"FLAG": `a\b`},
+			expected: header +
+				`FLAG="a\\b"` + "\n",
+		},
+		{
+			name:  "value with leading whitespace is quoted",
+			flags: map[string]string{"FLAG": " leading"},
+			expected: header +
+				"FLAG=\" leading\"\n",
+		},
+		{
+			name:     "simple value not quoted",
+			flags:    map[string]string{"FLAG": "simple"},
+			expected: header + "FLAG=simple\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -396,6 +425,23 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		}, agent)
 
 		assert.False(t, restarted)
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no flags and missing file skips without creating file", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{}, agent)
+
+		assert.False(t, restarted)
+		_, err := os.Stat(envPath)
+		assert.True(t, os.IsNotExist(err), "file should not be created")
 		agent.AssertExpectations(t)
 		oh.AssertExpectations(t)
 	})
