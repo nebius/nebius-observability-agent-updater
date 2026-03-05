@@ -20,6 +20,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -103,9 +104,12 @@ func New(metadata metadataReader, oh oshelper, dh dcgmhelper, config *config.Con
 		config.GRPC.Endpoint = endpoint
 	}
 	dialOptions := make([]grpc.DialOption, 0, 3)
-	creds := credentials.NewTLS(&tls.Config{})
-	// FIXME fill from config
-	dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
+	if config.GRPC.Insecure {
+		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else {
+		creds := credentials.NewTLS(&tls.Config{})
+		dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
+	}
 
 	dialOptions = append(dialOptions, grpc.WithKeepaliveParams(keepalive.ClientParameters{
 		Time:                config.GRPC.KeepAlive.Time,

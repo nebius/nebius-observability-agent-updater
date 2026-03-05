@@ -21,5 +21,8 @@ lint:
 	golangci-lint run -c .golangci.yaml
 
 test:
-	go test -v ./...
+	go test -v $(shell go list ./... | grep -v /tests/integration)
+
+integration-test:
+	go test -v ./tests/integration/... -timeout 10m
 

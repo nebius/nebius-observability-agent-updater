@@ -163,6 +163,11 @@ func (m *mockAgentData) Restart() error {
 	return args.Error(0)
 }
 
+func (m *mockAgentData) GetEnvironmentFilePath() string {
+	args := m.Called()
+	return args.String(0)
+}
+
 func (m *mockAgentData) GetLastUpdateError() error {
 	args := m.Called()
 	return args.Error(0)

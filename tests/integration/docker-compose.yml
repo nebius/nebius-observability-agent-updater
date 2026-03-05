@@ -1,0 +1,40 @@
+
+services:
+  mock-server:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Dockerfile.mock-server
+    container_name: updater-mock-server
+    networks:
+      - updater-net
+    ports:
+      - "50051:50051"
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  updater-test:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Dockerfile.updater
+    container_name: updater-test
+    privileged: true
+    cgroup: host
+    depends_on:
+      mock-server:
+        condition: service_healthy
+    networks:
+      - updater-net
+    environment:
+      - GOMAXPROCS=1
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+
+networks:
+  updater-net:
+    driver: bridge
+    name: updater-network

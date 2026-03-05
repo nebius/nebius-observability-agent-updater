@@ -1,0 +1,72 @@
+FROM golang:1.24-bookworm AS fake-agent-builder
+
+WORKDIR /build
+COPY tests/integration/fake-agent/main.go .
+RUN CGO_ENABLED=0 go build -o fake-agent main.go
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install essential dependencies
+RUN apt-get update && apt-get install -y \
+    systemd \
+    systemd-sysv \
+    dbus \
+    curl \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure journald for persistent storage
+RUN mkdir -p /var/log/journal && \
+    sed -i 's/^#\?Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
+
+# Mask services that are problematic in containers
+RUN systemctl mask \
+    systemd-udevd.service \
+    systemd-udevd-kernel.socket \
+    systemd-udevd-control.socket \
+    systemd-modules-load.service \
+    systemd-ask-password-console.path \
+    systemd-ask-password-wall.path \
+    sys-kernel-debug.mount \
+    sys-kernel-tracing.mount \
+    || true
+
+# Create necessary directories
+RUN mkdir -p /mnt/cloud-metadata \
+    /etc/nebius-observability-agent \
+    /etc/nebius-observability-agent-updater \
+    /deb \
+    /usr/local/bin
+
+# Copy fake-agent binary and service file
+COPY --from=fake-agent-builder /build/fake-agent /usr/local/bin/fake-agent
+COPY tests/integration/fake-agent/nebius_observability_agent.service /etc/systemd/system/nebius_observability_agent.service
+
+# Enable fake-agent service
+RUN systemctl enable nebius_observability_agent.service
+
+# Write cloud metadata files
+RUN echo -n "test-parent-id" > /mnt/cloud-metadata/parent-id && \
+    echo -n "test-instance-id" > /mnt/cloud-metadata/instance-id && \
+    echo -n "test-tsa-token" > /mnt/cloud-metadata/tsa-token
+
+# Write endpoint override to point to mock-server
+RUN echo -n "mock-server:50051" > /mnt/cloud-metadata/updater-endpoint-override
+
+# Note: updater config is written after dpkg install by the test suite,
+# because the deb package overwrites /etc/nebius-observability-agent-updater/config.yaml
+
+# Copy deb package for installation by test
+COPY nebius-observability-agent-updater-0.0-dev.deb /deb/nebius-observability-agent-updater.deb
+
+# systemd expects cgroups
+VOLUME ["/sys/fs/cgroup"]
+
+WORKDIR /root
+
+# Run systemd as PID 1
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

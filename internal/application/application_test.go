@@ -3,18 +3,19 @@ package application
 import (
 	"context"
 	"errors"
-	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
-	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"io"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
+	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/goleak"
-	"log/slog"
 )
 
 type MockUpdaterClient struct {
@@ -66,12 +67,16 @@ func (m *MockAgentData) GetLastUpdateError() error {
 	return nil
 }
 
+func (m *MockAgentData) GetEnvironmentFilePath() string {
+	args := m.Called()
+	return args.String(0)
+}
+
 func (m *MockAgentData) Restart() error {
 	args := m.Called()
 	return args.Error(0)
 }
 
-// New mock for OSHelper
 type MockOSHelper struct {
 	mock.Mock
 }
@@ -79,6 +84,28 @@ type MockOSHelper struct {
 func (m *MockOSHelper) GetSystemUptime() (time.Duration, error) {
 	args := m.Called()
 	return args.Get(0).(time.Duration), args.Error(1)
+}
+
+func (m *MockOSHelper) GetServiceUptime(serviceName string) (time.Duration, error) {
+	args := m.Called(serviceName)
+	return args.Get(0).(time.Duration), args.Error(1)
+}
+
+func newTestApp(client updaterClient, oh oshelper) *App {
+	return &App{
+		client: client,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config: config.GetDefaultConfig(),
+		oh:     oh,
+	}
+}
+
+func writeEnvFile(t *testing.T, path, content string, mtime time.Time) {
+	t.Helper()
+	err := os.WriteFile(path, []byte(content), 0640)
+	assert.NoError(t, err)
+	err = os.Chtimes(path, mtime, mtime)
+	assert.NoError(t, err)
 }
 
 func TestApp_New(t *testing.T) {
@@ -109,6 +136,7 @@ func TestApp_poll(t *testing.T) {
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
 			},
 			expectedLogMsg: "Polling for ",
 		},
@@ -120,6 +148,7 @@ func TestApp_poll(t *testing.T) {
 					Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
 				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
 				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
 			},
@@ -132,6 +161,7 @@ func TestApp_poll(t *testing.T) {
 					Action: agentmanager.Action_RESTART,
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
 				agent.On("Restart").Return(nil)
 			},
 			expectedLogMsg: "Polling for ",
@@ -153,13 +183,7 @@ func TestApp_poll(t *testing.T) {
 			oh := &MockOSHelper{}
 			tt.setupMocks(client, agent, oh)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			app := &App{
-				client: client,
-				logger: logger,
-				config: config.GetDefaultConfig(),
-				oh:     oh,
-			}
+			app := newTestApp(client, oh)
 
 			app.poll(agent)
 
@@ -232,12 +256,7 @@ func TestApp_Update(t *testing.T) {
 			oh := &MockOSHelper{}
 			tt.setupMocks(agent, oh)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			app := &App{
-				logger: logger,
-				config: config.GetDefaultConfig(),
-				oh:     oh,
-			}
+			app := newTestApp(nil, oh)
 
 			app.Update(tt.response, agent)
 
@@ -276,11 +295,7 @@ func TestApp_Restart(t *testing.T) {
 			agent := &MockAgentData{}
 			tt.setupMocks(agent)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			app := &App{
-				logger: logger,
-				config: config.GetDefaultConfig(),
-			}
+			app := newTestApp(nil, nil)
 
 			app.Restart(agent)
 
@@ -302,6 +317,7 @@ func TestApp_Run(t *testing.T) {
 	oh := &MockOSHelper{}
 
 	agent.On("GetServiceName").Return("test-agent")
+	agent.On("GetEnvironmentFilePath").Return("")
 	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 
 	app := New(cfg, client, logger, []agents.AgentData{agent}, oh)
@@ -320,4 +336,361 @@ func TestApp_Shutdown(t *testing.T) {
 	app := &App{}
 	err := app.Shutdown()
 	assert.NoError(t, err)
+}
+
+func TestGenerateEnvironmentFileContent(t *testing.T) {
+	header := "# Managed by agent updater. Variables are loaded as env vars at agent startup.\n"
+
+	tests := []struct {
+		name     string
+		flags    map[string]string
+		expected string
+	}{
+		{
+			name:     "nil flags",
+			flags:    nil,
+			expected: header,
+		},
+		{
+			name:     "empty flags",
+			flags:    map[string]string{},
+			expected: header,
+		},
+		{
+			name:  "single flag",
+			flags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
+			expected: header +
+				"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED=true\n",
+		},
+		{
+			name: "multiple flags sorted",
+			flags: map[string]string{
+				"FEATURE_FLAG_Z_LAST":  "false",
+				"FEATURE_FLAG_A_FIRST": "true",
+			},
+			expected: header +
+				"FEATURE_FLAG_A_FIRST=true\n" +
+				"FEATURE_FLAG_Z_LAST=false\n",
+		},
+		{
+			name:  "value with spaces is quoted",
+			flags: map[string]string{"FLAG": "hello world"},
+			expected: header +
+				"FLAG=\"hello world\"\n",
+		},
+		{
+			name:  "value with double quote is escaped",
+			flags: map[string]string{"FLAG": `say "hi"`},
+			expected: header +
+				`FLAG="say \"hi\""` + "\n",
+		},
+		{
+			name:  "value with backslash is escaped",
+			flags: map[string]string{"FLAG": `a\b`},
+			expected: header +
+				`FLAG="a\\b"` + "\n",
+		},
+		{
+			name:  "value with leading whitespace is quoted",
+			flags: map[string]string{"FLAG": " leading"},
+			expected: header +
+				"FLAG=\" leading\"\n",
+		},
+		{
+			name:     "simple value not quoted",
+			flags:    map[string]string{"FLAG": "simple"},
+			expected: header + "FLAG=simple\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateEnvironmentFileContent(tt.flags)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestApp_processFeatureFlags(t *testing.T) {
+	header := "# Managed by agent updater. Variables are loaded as env vars at agent startup.\n"
+
+	t.Run("empty env path skips processing", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		agent.On("GetEnvironmentFilePath").Return("")
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no flags and missing file skips without creating file", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{}, agent)
+
+		assert.False(t, restarted)
+		_, err := os.Stat(envPath)
+		assert.True(t, os.IsNotExist(err), "file should not be created")
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("write new feature flags file and restart", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+		agent.On("Restart").Return(nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
+		}, agent)
+
+		assert.True(t, restarted)
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED=true\n", string(content))
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no restart when agent uptime less than 15 minutes", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.False(t, restarted)
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FLAG=true\n", string(content))
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no restart when content unchanged and file older than agent", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-1*time.Hour))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(30*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(2*time.Hour, nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no spurious restart when file mtime within grace period of agent start", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-46*time.Second))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(45*time.Second, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("fresh boot restarts agent immediately even with low uptime", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(13*time.Minute+54*time.Second, nil)
+		oh.On("GetSystemUptime").Return(14*time.Minute+21*time.Second, nil)
+		agent.On("Restart").Return(nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.True(t, restarted)
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FLAG=true\n", string(content))
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("pending restart after previous crash", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-5*time.Minute))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+		agent.On("Restart").Return(nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.True(t, restarted)
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("pending restart deferred when agent uptime less than 15 minutes", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-10*time.Minute))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(5*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+}
+
+func TestApp_validateFeatureFlags(t *testing.T) {
+	app := newTestApp(nil, nil)
+
+	tests := []struct {
+		name     string
+		input    map[string]string
+		expected map[string]string
+	}{
+		{
+			name:     "nil flags",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "empty flags",
+			input:    map[string]string{},
+			expected: map[string]string{},
+		},
+		{
+			name:     "valid keys",
+			input:    map[string]string{"FEATURE_FLAG": "true", "_PRIVATE": "1", "a": "b"},
+			expected: map[string]string{"FEATURE_FLAG": "true", "_PRIVATE": "1", "a": "b"},
+		},
+		{
+			name:     "invalid key with space",
+			input:    map[string]string{"BAD KEY": "true", "GOOD_KEY": "val"},
+			expected: map[string]string{"GOOD_KEY": "val"},
+		},
+		{
+			name:     "invalid key starting with digit",
+			input:    map[string]string{"1BAD": "true"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "invalid key with special chars",
+			input:    map[string]string{"BAD-KEY": "true", "BAD.KEY": "false"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "newline in value",
+			input:    map[string]string{"FLAG": "line1\nline2"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "carriage return in value",
+			input:    map[string]string{"FLAG": "line1\rline2"},
+			expected: map[string]string{},
+		},
+		{
+			name:     "mixed valid and invalid",
+			input:    map[string]string{"GOOD": "ok", "BAD KEY": "no", "ALSO_GOOD": "yes", "NL_VAL": "a\nb"},
+			expected: map[string]string{"GOOD": "ok", "ALSO_GOOD": "yes"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := app.validateFeatureFlags(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
+	client := &MockUpdaterClient{}
+	agent := &MockAgentData{}
+	oh := &MockOSHelper{}
+	envPath := t.TempDir() + "/environment"
+
+	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
+		Action:       agentmanager.Action_RESTART,
+		FeatureFlags: map[string]string{"NEW_FLAG": "true"},
+	}, nil)
+	agent.On("GetServiceName").Return("test-agent")
+	agent.On("GetEnvironmentFilePath").Return(envPath)
+	oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+	agent.On("Restart").Return(nil).Once()
+
+	app := newTestApp(client, oh)
+
+	app.poll(agent)
+
+	client.AssertExpectations(t)
+	agent.AssertExpectations(t)
+	oh.AssertExpectations(t)
 }
