@@ -174,6 +174,21 @@ func generateEnvironmentFileContent(featureFlags map[string]string) string {
 	return sb.String()
 }
 
+// stripComments removes comment lines (starting with #) and blank lines,
+// returning only the meaningful content for comparison.
+func stripComments(s string) string {
+	var sb strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 func (s *App) validateFeatureFlags(flags map[string]string) map[string]string {
 	if len(flags) == 0 {
 		return flags
@@ -209,13 +224,13 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 		return false
 	}
 
-	// No flags and no existing file — nothing to do, avoid creating a
-	// header-only file that would trigger a spurious restart.
-	if len(featureFlags) == 0 && !fileExists {
+	// No flags and no existing file (or file with only comments) — nothing to do,
+	// avoid creating a header-only file that would trigger a spurious restart.
+	if len(featureFlags) == 0 && (!fileExists || stripComments(string(existingContent)) == "") {
 		return false
 	}
 
-	if string(existingContent) != newContent {
+	if stripComments(string(existingContent)) != stripComments(newContent) {
 		s.logger.Info("Feature flags changed, updating environment file", "agent", agent.GetServiceName(), "path", envPath)
 		if err := atomicWriteFile(envPath, []byte(newContent), 0640); err != nil {
 			s.logger.Error("Failed to write environment file", "error", err, "path", envPath)

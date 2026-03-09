@@ -584,6 +584,95 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		oh.AssertExpectations(t)
 	})
 
+	t.Run("no flags and comment-only file skips without rewriting", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, "# Managed by agent updater. Variables are loaded as env vars at agent startup.\n", time.Now().Add(-1*time.Hour))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertNotCalled(t, "Restart")
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no flags and empty file skips without rewriting", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, "", time.Now().Add(-1*time.Hour))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertNotCalled(t, "Restart")
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("no rewrite when only comments differ", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		// File has a different comment header but same flags
+		writeEnvFile(t, envPath, "# Old header comment\nFLAG=true\n", time.Now().Add(-1*time.Hour))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(30*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(2*time.Hour, nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "true"},
+		}, agent)
+
+		assert.False(t, restarted)
+		// Verify file was NOT rewritten (still has old header)
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, "# Old header comment\nFLAG=true\n", string(content))
+		agent.AssertNotCalled(t, "Restart")
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("rewrite when flags differ ignoring comments", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, "# some comment\nFLAG=old\n", time.Now().Add(-1*time.Hour))
+
+		agent.On("GetEnvironmentFilePath").Return(envPath)
+		agent.On("GetServiceName").Return("test-agent")
+		oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
+		oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+		agent.On("Restart").Return(nil)
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlags: map[string]string{"FLAG": "new"},
+		}, agent)
+
+		assert.True(t, restarted)
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FLAG=new\n", string(content))
+		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
 	t.Run("pending restart deferred when agent uptime less than 15 minutes", func(t *testing.T) {
 		agent := &MockAgentData{}
 		oh := &MockOSHelper{}
@@ -605,6 +694,62 @@ func TestApp_processFeatureFlags(t *testing.T) {
 		agent.AssertNotCalled(t, "Restart")
 		oh.AssertExpectations(t)
 	})
+}
+
+func TestStripComments(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "only comments",
+			input:    "# comment one\n# comment two\n",
+			expected: "",
+		},
+		{
+			name:     "only blank lines",
+			input:    "\n\n\n",
+			expected: "",
+		},
+		{
+			name:     "comments and blank lines",
+			input:    "# header\n\n# another comment\n",
+			expected: "",
+		},
+		{
+			name:     "content with comments",
+			input:    "# header\nFLAG=true\n",
+			expected: "FLAG=true\n",
+		},
+		{
+			name:     "content without comments",
+			input:    "FLAG=true\nOTHER=false\n",
+			expected: "FLAG=true\nOTHER=false\n",
+		},
+		{
+			name:     "comment with leading whitespace",
+			input:    "  # indented comment\nFLAG=true\n",
+			expected: "FLAG=true\n",
+		},
+		{
+			name:     "value containing hash is not a comment",
+			input:    "FLAG=val#ue\n",
+			expected: "FLAG=val#ue\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripComments(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestApp_validateFeatureFlags(t *testing.T) {
