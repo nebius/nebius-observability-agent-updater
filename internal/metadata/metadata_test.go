@@ -14,7 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const instanceDataPath = "/v1/instance-data"
+const (
+	instanceDataPath   = "/v1/instance-data"
+	tokenAccessPath    = "/v1/iam/tsa/token/access_token"
+	tokenExpiresAtPath = "/v1/iam/tsa/token/expires_at"
+)
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -117,10 +121,10 @@ func TestGetIamToken_IMDS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "true", r.Header.Get("Metadata"))
 		switch r.URL.Path {
-		case "/v1/iam/tsa/token/access_token":
+		case tokenAccessPath:
 			_, err := w.Write([]byte("my-iam-token"))
 			assert.NoError(t, err)
-		case "/v1/iam/tsa/token/expires_at":
+		case tokenExpiresAtPath:
 			_, err := w.Write([]byte(expiresAt))
 			assert.NoError(t, err)
 		default:
@@ -146,11 +150,11 @@ func TestGetIamToken_Cached(t *testing.T) {
 	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/iam/tsa/token/access_token":
+		case tokenAccessPath:
 			tokenCallCount++
 			_, err := w.Write([]byte("my-iam-token"))
 			assert.NoError(t, err)
-		case "/v1/iam/tsa/token/expires_at":
+		case tokenExpiresAtPath:
 			_, err := w.Write([]byte(expiresAt))
 			assert.NoError(t, err)
 		default:
@@ -184,11 +188,11 @@ func TestGetIamToken_RefreshesWhenNearExpiry(t *testing.T) {
 	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/iam/tsa/token/access_token":
+		case tokenAccessPath:
 			tokenCallCount++
 			_, err := fmt.Fprintf(w, "token-%d", tokenCallCount)
 			assert.NoError(t, err)
-		case "/v1/iam/tsa/token/expires_at":
+		case tokenExpiresAtPath:
 			_, err := w.Write([]byte(expiresAt))
 			assert.NoError(t, err)
 		default:
@@ -227,7 +231,7 @@ func TestGetIamToken_UsesStaleTokenOnRefreshFailure(t *testing.T) {
 	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/iam/tsa/token/access_token":
+		case tokenAccessPath:
 			tokenCallCount++
 			if tokenCallCount > 1 {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -235,7 +239,7 @@ func TestGetIamToken_UsesStaleTokenOnRefreshFailure(t *testing.T) {
 			}
 			_, err := w.Write([]byte("original-token"))
 			assert.NoError(t, err)
-		case "/v1/iam/tsa/token/expires_at":
+		case tokenExpiresAtPath:
 			_, err := w.Write([]byte(expiresAt))
 			assert.NoError(t, err)
 		default:
@@ -271,10 +275,10 @@ func TestGetIamToken_AlreadyExpired(t *testing.T) {
 	expiredAt := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/iam/tsa/token/access_token":
+		case tokenAccessPath:
 			_, err := w.Write([]byte("expired-token"))
 			assert.NoError(t, err)
-		case "/v1/iam/tsa/token/expires_at":
+		case tokenExpiresAtPath:
 			_, err := w.Write([]byte(expiredAt))
 			assert.NoError(t, err)
 		default:

@@ -49,8 +49,8 @@ type Reader struct {
 	cachedInstance  *instanceData
 	cachedFetchedAt time.Time
 
-	tokenMu     sync.Mutex
-	cachedIAM   *cachedToken
+	tokenMu   sync.Mutex
+	cachedIAM *cachedToken
 }
 
 func NewReader(cfg Config, logger *slog.Logger) *Reader {
