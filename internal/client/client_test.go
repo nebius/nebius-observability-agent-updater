@@ -38,7 +38,7 @@ func (m *mockMetadataReader) GetParentId() (string, error) {
 
 func (m *mockMetadataReader) GetInstanceId() (string, bool, error) {
 	args := m.Called()
-	return args.String(0), false, args.Error(1)
+	return args.String(0), args.Bool(1), args.Error(2)
 }
 
 func (m *mockMetadataReader) GetIamToken() (string, error) {
@@ -212,7 +212,7 @@ func TestSendAgentData(t *testing.T) {
 
 	// Set up mock expectations
 	metadata.On("GetParentId").Return("parent-123", nil)
-	metadata.On("GetInstanceId").Return("instance-456", nil)
+	metadata.On("GetInstanceId").Return("instance-456", false, nil)
 	oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
@@ -265,7 +265,7 @@ func TestFillRequest(t *testing.T) {
 
 	// Set up mock expectations
 	metadata.On("GetParentId").Return("parent-123", nil)
-	metadata.On("GetInstanceId").Return("instance-456", nil)
+	metadata.On("GetInstanceId").Return("instance-456", false, nil)
 	oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
@@ -378,7 +378,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 
 	// Set up mock expectations
 	metadata.On("GetParentId").Return("parent-123", nil)
-	metadata.On("GetInstanceId").Return("instance-456", nil)
+	metadata.On("GetInstanceId").Return("instance-456", false, nil)
 	oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
@@ -452,7 +452,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 
 	// Set up mock expectations (same as in the previous test)
 	metadata.On("GetParentId").Return("parent-123", nil)
-	metadata.On("GetInstanceId").Return("instance-456", nil)
+	metadata.On("GetInstanceId").Return("instance-456", false, nil)
 	oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
@@ -516,7 +516,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	oh.On("GetDebVersion", "test-agent-package").Return("", osutils.ErrDebNotFound)
 	oh.On("GetDebVersion", "nebius-observability-agent-updater").Return("", osutils.ErrDebNotFound)
 	metadata.On("GetParentId").Return("parent-123", nil)
-	metadata.On("GetInstanceId").Return("instance-456", nil)
+	metadata.On("GetInstanceId").Return("instance-456", false, nil)
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)

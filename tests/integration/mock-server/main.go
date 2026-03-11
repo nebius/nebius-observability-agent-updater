@@ -9,11 +9,14 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+const metadataHeaderValue = "true"
 
 type mockVersionService struct {
 	agentmanager.UnimplementedVersionServiceServer
@@ -70,25 +73,7 @@ func (s *mockVersionService) clear() {
 	}
 }
 
-func main() {
-	svc := newMockVersionService()
-
-	// Start gRPC server
-	var lc net.ListenConfig
-	grpcLis, err := lc.Listen(context.Background(), "tcp", ":50051")
-	if err != nil {
-		log.Fatalf("failed to listen on :50051: %v", err)
-	}
-	grpcServer := grpc.NewServer()
-	agentmanager.RegisterVersionServiceServer(grpcServer, svc)
-	go func() {
-		log.Println("gRPC server listening on :50051")
-		if err := grpcServer.Serve(grpcLis); err != nil {
-			log.Fatalf("gRPC serve error: %v", err)
-		}
-	}()
-
-	// Start HTTP control API
+func setupControlAPI(svc *mockVersionService) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/response", func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +92,7 @@ func main() {
 			return
 		}
 		svc.setResponse(resp)
-		log.Printf("Response set: action=%s feature_flags=%v", resp.GetAction().String(), resp.GetFeatureFlags())
+		log.Printf("Response set: action=%s", resp.GetAction().String())
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
 	})
@@ -161,8 +146,82 @@ func main() {
 		fmt.Fprint(w, "ok")
 	})
 
+	return mux
+}
+
+func requireMetadataHeader(w http.ResponseWriter, r *http.Request) bool {
+	if r.Header.Get("Metadata") != metadataHeaderValue {
+		http.Error(w, "missing Metadata header", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func setupIMDSMock() *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/v1/instance-data", func(w http.ResponseWriter, r *http.Request) {
+		if !requireMetadataHeader(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "test-instance-id", "parent_id": "test-parent-id"}`))
+	})
+
+	mux.HandleFunc("/v1/instance-data/o11y/updater-endpoint-override", func(w http.ResponseWriter, r *http.Request) {
+		if !requireMetadataHeader(w, r) {
+			return
+		}
+		_, _ = w.Write([]byte("mock-server:50051"))
+	})
+
+	mux.HandleFunc("/v1/iam/tsa/token/access_token", func(w http.ResponseWriter, r *http.Request) {
+		if !requireMetadataHeader(w, r) {
+			return
+		}
+		_, _ = w.Write([]byte("test-tsa-token"))
+	})
+
+	mux.HandleFunc("/v1/iam/tsa/token/expires_at", func(w http.ResponseWriter, r *http.Request) {
+		if !requireMetadataHeader(w, r) {
+			return
+		}
+		expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
+		_, _ = w.Write([]byte(expiresAt))
+	})
+
+	return mux
+}
+
+func main() {
+	svc := newMockVersionService()
+
+	// Start gRPC server
+	var lc net.ListenConfig
+	grpcLis, err := lc.Listen(context.Background(), "tcp", ":50051")
+	if err != nil {
+		log.Fatalf("failed to listen on :50051: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	agentmanager.RegisterVersionServiceServer(grpcServer, svc)
+	go func() {
+		log.Println("gRPC server listening on :50051")
+		if err := grpcServer.Serve(grpcLis); err != nil {
+			log.Fatalf("gRPC serve error: %v", err)
+		}
+	}()
+
+	// Start IMDS mock server on port 80
+	go func() {
+		log.Println("IMDS mock listening on :80")
+		if err := http.ListenAndServe(":80", setupIMDSMock()); err != nil {
+			log.Fatalf("IMDS mock serve error: %v", err)
+		}
+	}()
+
+	// Start HTTP control API
 	log.Println("HTTP control API listening on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", setupControlAPI(svc)); err != nil {
 		log.Fatalf("HTTP serve error: %v", err)
 	}
 }
