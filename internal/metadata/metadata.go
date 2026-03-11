@@ -32,6 +32,14 @@ type instanceData struct {
 
 const instanceDataCacheTTL = 5 * time.Minute
 
+// tokenRefreshMargin is how long before expiry we refresh the token
+const tokenRefreshMargin = 1 * time.Hour
+
+type cachedToken struct {
+	token     string
+	expiresAt time.Time
+}
+
 type Reader struct {
 	cfg    Config
 	logger *slog.Logger
@@ -40,6 +48,9 @@ type Reader struct {
 	mu              sync.Mutex
 	cachedInstance  *instanceData
 	cachedFetchedAt time.Time
+
+	tokenMu     sync.Mutex
+	cachedIAM   *cachedToken
 }
 
 func NewReader(cfg Config, logger *slog.Logger) *Reader {
@@ -80,14 +91,62 @@ func (r *Reader) GetInstanceId() (instanceId string, isFallback bool, err error)
 
 func (r *Reader) GetIamToken() (string, error) {
 	if r.cfg.UseMetadataService {
-		tokenPath := fmt.Sprintf("/v1/iam/%s/token/access_token", r.cfg.MetadataTokenType)
-		body, err := r.fetchFromMetadataService(tokenPath)
+		token, err := r.getCachedIAMToken()
 		if err == nil {
-			return strings.TrimSpace(string(body)), nil
+			return token, nil
 		}
 		r.logger.Warn("Failed to get IAM token from IMDS, falling back to file", "error", err)
 	}
 	return r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.IamTokenFilename)
+}
+
+func (r *Reader) getCachedIAMToken() (string, error) {
+	r.tokenMu.Lock()
+	defer r.tokenMu.Unlock()
+
+	if r.cachedIAM != nil && time.Until(r.cachedIAM.expiresAt) > tokenRefreshMargin {
+		return r.cachedIAM.token, nil
+	}
+
+	tokenPath := fmt.Sprintf("/v1/iam/%s/token/access_token", r.cfg.MetadataTokenType)
+	body, err := r.fetchFromMetadataService(tokenPath)
+	if err != nil {
+		if r.cachedIAM != nil && time.Until(r.cachedIAM.expiresAt) > 0 {
+			r.logger.Warn("Failed to refresh IAM token, using cached token until expiry", "error", err, "expires_at", r.cachedIAM.expiresAt)
+			return r.cachedIAM.token, nil
+		}
+		return "", fmt.Errorf("failed to fetch IAM token from IMDS: %w", err)
+	}
+	token := strings.TrimSpace(string(body))
+
+	expiresAt, err := r.fetchTokenExpiresAt()
+	if err != nil {
+		r.logger.Warn("Failed to get token expiry from IMDS, using default TTL", "error", err)
+		expiresAt = time.Now().Add(instanceDataCacheTTL)
+	}
+
+	if time.Until(expiresAt) <= 0 {
+		return "", fmt.Errorf("token from IMDS is already expired (expires_at: %s)", expiresAt.Format(time.RFC3339Nano))
+	}
+
+	r.cachedIAM = &cachedToken{
+		token:     token,
+		expiresAt: expiresAt,
+	}
+	return token, nil
+}
+
+func (r *Reader) fetchTokenExpiresAt() (time.Time, error) {
+	expiresAtPath := fmt.Sprintf("/v1/iam/%s/token/expires_at", r.cfg.MetadataTokenType)
+	body, err := r.fetchFromMetadataService(expiresAtPath)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to fetch token expires_at: %w", err)
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(body)))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse expires_at timestamp: %w", err)
+	}
+	return expiresAt, nil
 }
 
 func (r *Reader) getInstanceData() (*instanceData, error) {

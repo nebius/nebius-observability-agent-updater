@@ -113,14 +113,19 @@ func TestGetInstanceId_IMDSFallbackURL(t *testing.T) {
 }
 
 func TestGetIamToken_IMDS(t *testing.T) {
+	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "true", r.Header.Get("Metadata"))
-		if r.URL.Path == "/v1/iam/tsa/token/access_token" {
+		switch r.URL.Path {
+		case "/v1/iam/tsa/token/access_token":
 			_, err := w.Write([]byte("my-iam-token"))
 			assert.NoError(t, err)
-			return
+		case "/v1/iam/tsa/token/expires_at":
+			_, err := w.Write([]byte(expiresAt))
+			assert.NoError(t, err)
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	}))
 	defer server.Close()
 
@@ -134,6 +139,172 @@ func TestGetIamToken_IMDS(t *testing.T) {
 	token, err := reader.GetIamToken()
 	require.NoError(t, err)
 	assert.Equal(t, "my-iam-token", token)
+}
+
+func TestGetIamToken_Cached(t *testing.T) {
+	tokenCallCount := 0
+	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/iam/tsa/token/access_token":
+			tokenCallCount++
+			_, err := w.Write([]byte("my-iam-token"))
+			assert.NoError(t, err)
+		case "/v1/iam/tsa/token/expires_at":
+			_, err := w.Write([]byte(expiresAt))
+			assert.NoError(t, err)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	reader := NewReader(Config{
+		UseMetadataService:         true,
+		MetadataServiceURL:         server.URL,
+		MetadataServiceFallbackURL: server.URL,
+		MetadataTokenType:          "tsa",
+	}, testLogger())
+
+	// First call fetches from IMDS
+	token, err := reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "my-iam-token", token)
+
+	// Second call should use cache
+	token, err = reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "my-iam-token", token)
+
+	assert.Equal(t, 1, tokenCallCount, "token should be fetched only once while cached")
+}
+
+func TestGetIamToken_RefreshesWhenNearExpiry(t *testing.T) {
+	tokenCallCount := 0
+	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/iam/tsa/token/access_token":
+			tokenCallCount++
+			_, err := fmt.Fprintf(w, "token-%d", tokenCallCount)
+			assert.NoError(t, err)
+		case "/v1/iam/tsa/token/expires_at":
+			_, err := w.Write([]byte(expiresAt))
+			assert.NoError(t, err)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	reader := NewReader(Config{
+		UseMetadataService:         true,
+		MetadataServiceURL:         server.URL,
+		MetadataServiceFallbackURL: server.URL,
+		MetadataTokenType:          "tsa",
+	}, testLogger())
+
+	// First fetch
+	token, err := reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "token-1", token)
+	assert.Equal(t, 1, tokenCallCount)
+
+	// Simulate token about to expire (within refresh margin)
+	reader.tokenMu.Lock()
+	reader.cachedIAM.expiresAt = time.Now().Add(30 * time.Minute) // less than 1 hour margin
+	reader.tokenMu.Unlock()
+
+	// Should re-fetch
+	token, err = reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "token-2", token)
+	assert.Equal(t, 2, tokenCallCount)
+}
+
+func TestGetIamToken_UsesStaleTokenOnRefreshFailure(t *testing.T) {
+	tokenCallCount := 0
+	expiresAt := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339Nano)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/iam/tsa/token/access_token":
+			tokenCallCount++
+			if tokenCallCount > 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, err := w.Write([]byte("original-token"))
+			assert.NoError(t, err)
+		case "/v1/iam/tsa/token/expires_at":
+			_, err := w.Write([]byte(expiresAt))
+			assert.NoError(t, err)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	reader := NewReader(Config{
+		UseMetadataService:         true,
+		MetadataServiceURL:         server.URL,
+		MetadataServiceFallbackURL: server.URL,
+		MetadataTokenType:          "tsa",
+	}, testLogger())
+
+	// First fetch succeeds
+	token, err := reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "original-token", token)
+
+	// Simulate near expiry but not yet expired
+	reader.tokenMu.Lock()
+	reader.cachedIAM.expiresAt = time.Now().Add(30 * time.Minute) // needs refresh but not expired
+	reader.tokenMu.Unlock()
+
+	// Refresh fails — should return stale token since it hasn't expired yet
+	token, err = reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "original-token", token)
+}
+
+func TestGetIamToken_AlreadyExpired(t *testing.T) {
+	expiredAt := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/iam/tsa/token/access_token":
+			_, err := w.Write([]byte("expired-token"))
+			assert.NoError(t, err)
+		case "/v1/iam/tsa/token/expires_at":
+			_, err := w.Write([]byte(expiredAt))
+			assert.NoError(t, err)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "tsa-token"), []byte("file-token\n"), 0644)
+	require.NoError(t, err)
+
+	reader := NewReader(Config{
+		UseMetadataService:         true,
+		MetadataServiceURL:         server.URL,
+		MetadataServiceFallbackURL: server.URL,
+		MetadataTokenType:          "tsa",
+		Path:                       tmpDir,
+		IamTokenFilename:           "tsa-token",
+	}, testLogger())
+
+	// Token from IMDS is expired — should error from getCachedIAMToken and fall back to file
+	token, err := reader.GetIamToken()
+	require.NoError(t, err)
+	assert.Equal(t, "file-token", token)
+
+	// Verify token was not cached
+	reader.tokenMu.Lock()
+	assert.Nil(t, reader.cachedIAM, "expired token should not be cached")
+	reader.tokenMu.Unlock()
 }
 
 func TestGetIamToken_FileFallback(t *testing.T) {
