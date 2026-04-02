@@ -7,7 +7,7 @@ toolchain go1.24.6
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/nebius/gosdk v0.0.0-20260224102557-79cf94c49623
+	github.com/nebius/gosdk v0.2.8
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0

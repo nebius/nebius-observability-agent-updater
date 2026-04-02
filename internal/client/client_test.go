@@ -297,6 +297,18 @@ func TestFillRequest(t *testing.T) {
 			IsOk:    false,
 			Reasons: []string{"GPU driver not found"},
 		},
+		"compute_gpu_logs": {
+			IsOk:    true,
+			Reasons: []string{"Compute GPU logs pipeline is running"},
+		},
+		"journald": {
+			IsOk:    true,
+			Reasons: []string{"Journald pipeline is running"},
+		},
+		"nccl_metrics": {
+			IsOk:    false,
+			Reasons: []string{"NCCL metrics not available"},
+		},
 	}
 
 	healthResponse := healthcheck.Response{
@@ -344,6 +356,12 @@ func TestFillRequest(t *testing.T) {
 	assert.Equal(t, []string{"CPU usage is normal"}, req.ModulesHealth.CpuPipeline.Messages)
 	assert.Equal(t, agentmanager.AgentState_STATE_ERROR, req.ModulesHealth.GpuPipeline.State)
 	assert.Equal(t, []string{"GPU driver not found"}, req.ModulesHealth.GpuPipeline.Messages)
+	assert.Equal(t, agentmanager.AgentState_STATE_HEALTHY, req.ModulesHealth.ComputeGpuLogsPipeline.State)
+	assert.Equal(t, []string{"Compute GPU logs pipeline is running"}, req.ModulesHealth.ComputeGpuLogsPipeline.Messages)
+	assert.Equal(t, agentmanager.AgentState_STATE_HEALTHY, req.ModulesHealth.JournaldPipeline.State)
+	assert.Equal(t, []string{"Journald pipeline is running"}, req.ModulesHealth.JournaldPipeline.Messages)
+	assert.Equal(t, agentmanager.AgentState_STATE_ERROR, req.ModulesHealth.NcclMetricsPipeline.State)
+	assert.Equal(t, []string{"NCCL metrics not available"}, req.ModulesHealth.NcclMetricsPipeline.Messages)
 
 	// Verify mock expectations
 	metadata.AssertExpectations(t)
