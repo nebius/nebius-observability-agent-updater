@@ -6,7 +6,9 @@ services:
       dockerfile: tests/integration/Dockerfile.mock-server
     container_name: updater-mock-server
     networks:
-      - updater-net
+      updater-net:
+        aliases:
+          - metadata.nebius.internal
     ports:
       - "50051:50051"
       - "18080:8080"
