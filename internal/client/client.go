@@ -81,6 +81,9 @@ const (
 	VmappsHealthKey            = "vmapps"
 	CommonServiceLogsHealthKey = "common_service_logs"
 	VmServiceLogsHealthKey     = "vm_service_logs"
+	ComputeGpuLogsHealthKey    = "compute_gpu_logs"
+	JournaldHealthKey          = "journald"
+	NcclMetricsHealthKey       = "nccl_metrics"
 )
 
 type Client struct {
@@ -311,15 +314,21 @@ func (s *Client) fillHealthInfo(req *agentmanager.GetVersionRequest, agent agent
 		}
 	}
 
-	var cpuError, gpuError, ciliumError, vmappsError, commonServiceLogsError, vmServiceLogsError bool
+	var cpuError, gpuError, ciliumError, vmappsError, commonServiceLogsError, vmServiceLogsError, computeGpuLogsError, journaldError, ncclMetricsError bool
 	cpuError, req.ModulesHealth.CpuPipeline = s.processModuleHealth(CpuHealthKey, response.CheckStatuses)
 	gpuError, req.ModulesHealth.GpuPipeline = s.processModuleHealth(GpuHealthKey, response.CheckStatuses)
 	ciliumError, req.ModulesHealth.CiliumPipeline = s.processModuleHealth(CiliumHealthKey, response.CheckStatuses)
 	vmappsError, req.ModulesHealth.VmappsPipeline = s.processModuleHealth(VmappsHealthKey, response.CheckStatuses)
 	commonServiceLogsError, req.ModulesHealth.CommonServiceLogsPipeline = s.processModuleHealth(CommonServiceLogsHealthKey, response.CheckStatuses)
 	vmServiceLogsError, req.ModulesHealth.VmServiceLogsPipeline = s.processModuleHealth(VmServiceLogsHealthKey, response.CheckStatuses)
+	computeGpuLogsError, req.ModulesHealth.ComputeGpuLogsPipeline = s.processModuleHealth(ComputeGpuLogsHealthKey, response.CheckStatuses)
+	journaldError, req.ModulesHealth.JournaldPipeline = s.processModuleHealth(JournaldHealthKey, response.CheckStatuses)
+	ncclMetricsError, req.ModulesHealth.NcclMetricsPipeline = s.processModuleHealth(NcclMetricsHealthKey, response.CheckStatuses)
 
-	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !gpuError && !cpuError && !ciliumError && !vmappsError && !commonServiceLogsError && !vmServiceLogsError {
+	anyPipelineError := gpuError || cpuError || ciliumError || vmappsError ||
+		commonServiceLogsError || vmServiceLogsError || computeGpuLogsError ||
+		journaldError || ncclMetricsError
+	if req.AgentState != agentmanager.AgentState_STATE_HEALTHY && !anyPipelineError {
 		lastLogs, err := s.oh.GetLastLogs(agent.GetServiceName(), 10)
 		if err != nil {
 			s.logger.Error("failed to get last logs", "error", err)
