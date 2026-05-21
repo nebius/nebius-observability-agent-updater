@@ -24,6 +24,11 @@ import (
 const (
 	mockServerControlURL = "http://localhost:18080"
 	updaterContainerName = "updater-test"
+
+	cmdSystemctl = "systemctl"
+	flagNoPager  = "--no-pager"
+
+	removeFlagA = "REMOVE_FLAG_A"
 )
 
 type UpdaterSuite struct {
@@ -221,7 +226,7 @@ func (s *UpdaterSuite) waitForSystemdReady() error {
 
 	for i := 0; i < 60; i++ {
 		execConfig := container.ExecOptions{
-			Cmd:          []string{"systemctl", "is-system-running"},
+			Cmd:          []string{cmdSystemctl, "is-system-running"},
 			AttachStdout: true,
 			AttachStderr: true,
 		}
@@ -258,7 +263,7 @@ func (s *UpdaterSuite) checkServiceActive(serviceName string) error {
 	ctx := context.Background()
 	for i := 0; i < 30; i++ {
 		execConfig := container.ExecOptions{
-			Cmd:          []string{"systemctl", "is-active", serviceName},
+			Cmd:          []string{cmdSystemctl, "is-active", serviceName},
 			AttachStdout: true,
 			AttachStderr: true,
 		}
@@ -318,7 +323,7 @@ update_repo_script_path: /usr/local/bin/fake-update-repo.sh
 
 func (s *UpdaterSuite) startUpdater() {
 	cmd := exec.CommandContext(context.Background(), "docker", "exec", s.containerID,
-		"systemctl", "restart", "nebius_observability_agent_updater")
+		cmdSystemctl, "restart", "nebius_observability_agent_updater")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		s.T().Logf("systemctl restart output: %s", string(output))
@@ -556,16 +561,16 @@ func (s *UpdaterSuite) printContainerLogs(message string) {
 
 	// Updater journal logs
 	s.T().Logf("\n--- Updater Journal Logs ---")
-	s.logContainerExecOutput(ctx, []string{"journalctl", "-u", "nebius_observability_agent_updater", "-n", "200", "--no-pager"})
+	s.logContainerExecOutput(ctx, []string{"journalctl", "-u", "nebius_observability_agent_updater", "-n", "200", flagNoPager})
 
 	// Fake agent journal logs
 	s.T().Logf("\n--- Fake Agent Journal Logs ---")
-	s.logContainerExecOutput(ctx, []string{"journalctl", "-u", "nebius_observability_agent", "-n", "50", "--no-pager"})
+	s.logContainerExecOutput(ctx, []string{"journalctl", "-u", "nebius_observability_agent", "-n", "50", flagNoPager})
 
 	// Systemd service statuses
 	s.T().Logf("\n--- Systemd Status ---")
-	s.logContainerExecOutput(ctx, []string{"systemctl", "status", "nebius_observability_agent_updater", "--no-pager"})
-	s.logContainerExecOutput(ctx, []string{"systemctl", "status", "nebius_observability_agent", "--no-pager"})
+	s.logContainerExecOutput(ctx, []string{cmdSystemctl, "status", "nebius_observability_agent_updater", flagNoPager})
+	s.logContainerExecOutput(ctx, []string{cmdSystemctl, "status", "nebius_observability_agent", flagNoPager})
 
 	s.T().Logf("\n=== End of logs ===")
 }

@@ -180,7 +180,7 @@ func (s *UpdaterSuite) TestFeatureFlagRemoval() {
 	s.setMockResponse(&agentmanager.GetVersionResponse{
 		Action: agentmanager.Action_NOP,
 		FeatureFlags: map[string]string{
-			"REMOVE_FLAG_A": "1",
+			removeFlagA:     "1",
 			"REMOVE_FLAG_B": "2",
 		},
 	})
@@ -200,7 +200,7 @@ func (s *UpdaterSuite) TestFeatureFlagRemoval() {
 	s.setMockResponse(&agentmanager.GetVersionResponse{
 		Action: agentmanager.Action_RESTART,
 		FeatureFlags: map[string]string{
-			"REMOVE_FLAG_A": "1",
+			removeFlagA: "1",
 		},
 	})
 
@@ -219,7 +219,7 @@ func (s *UpdaterSuite) TestFeatureFlagRemoval() {
 	s.setMockResponse(&agentmanager.GetVersionResponse{
 		Action: agentmanager.Action_NOP,
 		FeatureFlags: map[string]string{
-			"REMOVE_FLAG_A": "1",
+			removeFlagA: "1",
 		},
 	})
 }

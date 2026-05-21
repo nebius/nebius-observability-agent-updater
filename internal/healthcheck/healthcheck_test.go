@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+const (
+	moduleCPU       = "cpu"
+	moduleGPU       = "gpu"
+	reasonProcessOk = "Process running normally"
+	reasonCPUOk     = "CPU pipeline operational"
+	reasonDBError   = "Database connection error"
+	reasonHighCPU   = "High CPU usage"
+)
+
 // nolint: gocognit
 func TestCheckHealthWithReasons(t *testing.T) {
 	tests := []struct {
@@ -26,15 +35,15 @@ func TestCheckHealthWithReasons(t *testing.T) {
 				Uptime:    "1h",
 				Reasons:   []string{"All systems operational"},
 				CheckStatuses: map[string]CheckStatus{
-					"process": {
+					moduleProcess: {
 						IsOk:    true,
-						Reasons: []string{"Process running normally"},
+						Reasons: []string{reasonProcessOk},
 					},
-					"cpu": {
+					moduleCPU: {
 						IsOk:    true,
-						Reasons: []string{"CPU pipeline operational"},
+						Reasons: []string{reasonCPUOk},
 					},
-					"gpu": {
+					moduleGPU: {
 						IsOk:    true,
 						Reasons: []string{"GPU pipeline operational"},
 					},
@@ -46,15 +55,15 @@ func TestCheckHealthWithReasons(t *testing.T) {
 				StatusMsg: "healthy",
 				Reasons:   []string{"All systems operational"},
 				CheckStatuses: map[string]CheckStatus{
-					"process": {
+					moduleProcess: {
 						IsOk:    true,
-						Reasons: []string{"Process running normally"},
+						Reasons: []string{reasonProcessOk},
 					},
-					"cpu": {
+					moduleCPU: {
 						IsOk:    true,
-						Reasons: []string{"CPU pipeline operational"},
+						Reasons: []string{reasonCPUOk},
 					},
-					"gpu": {
+					moduleGPU: {
 						IsOk:    true,
 						Reasons: []string{"GPU pipeline operational"},
 					},
@@ -64,20 +73,20 @@ func TestCheckHealthWithReasons(t *testing.T) {
 		{
 			name: "Mixed health status with some modules failing",
 			serverResponse: Response{
-				StatusMsg: "error",
+				StatusMsg: statusError,
 				UpSince:   time.Now(),
 				Uptime:    "1h",
 				Reasons:   []string{"GPU pipeline error"},
 				CheckStatuses: map[string]CheckStatus{
-					"process": {
+					moduleProcess: {
 						IsOk:    true,
-						Reasons: []string{"Process running normally"},
+						Reasons: []string{reasonProcessOk},
 					},
-					"cpu": {
+					moduleCPU: {
 						IsOk:    true,
-						Reasons: []string{"CPU pipeline operational"},
+						Reasons: []string{reasonCPUOk},
 					},
-					"gpu": {
+					moduleGPU: {
 						IsOk:    false,
 						Reasons: []string{"GPU pipeline error: CUDA initialization failed"},
 					},
@@ -86,18 +95,18 @@ func TestCheckHealthWithReasons(t *testing.T) {
 			statusCode:  http.StatusInternalServerError,
 			wantHealthy: false,
 			wantResponse: Response{
-				StatusMsg: "error",
+				StatusMsg: statusError,
 				Reasons:   []string{"GPU pipeline error"},
 				CheckStatuses: map[string]CheckStatus{
-					"process": {
+					moduleProcess: {
 						IsOk:    true,
-						Reasons: []string{"Process running normally"},
+						Reasons: []string{reasonProcessOk},
 					},
-					"cpu": {
+					moduleCPU: {
 						IsOk:    true,
-						Reasons: []string{"CPU pipeline operational"},
+						Reasons: []string{reasonCPUOk},
 					},
-					"gpu": {
+					moduleGPU: {
 						IsOk:    false,
 						Reasons: []string{"GPU pipeline error: CUDA initialization failed"},
 					},
@@ -107,26 +116,26 @@ func TestCheckHealthWithReasons(t *testing.T) {
 		{
 			name: "All modules unhealthy",
 			serverResponse: Response{
-				StatusMsg: "error",
+				StatusMsg: statusError,
 				UpSince:   time.Now(),
 				Uptime:    "1h",
-				Reasons:   []string{"Database connection error", "High CPU usage"},
+				Reasons:   []string{reasonDBError, reasonHighCPU},
 				CheckStatuses: map[string]CheckStatus{
-					"process": {
+					moduleProcess: {
 						IsOk:    false,
-						Reasons: []string{"Database connection error", "High CPU usage"},
+						Reasons: []string{reasonDBError, reasonHighCPU},
 					},
 				},
 			},
 			statusCode:  http.StatusInternalServerError,
 			wantHealthy: false,
 			wantResponse: Response{
-				StatusMsg: "error",
-				Reasons:   []string{"Database connection error", "High CPU usage"},
+				StatusMsg: statusError,
+				Reasons:   []string{reasonDBError, reasonHighCPU},
 				CheckStatuses: map[string]CheckStatus{
-					"process": {
+					moduleProcess: {
 						IsOk:    false,
-						Reasons: []string{"Database connection error", "High CPU usage"},
+						Reasons: []string{reasonDBError, reasonHighCPU},
 					},
 				},
 			},
@@ -267,11 +276,11 @@ func TestCheckHealthWithReasons_ServerErrors(t *testing.T) {
 			}
 
 			// Verify error response structure
-			if resp.StatusMsg != "error" {
+			if resp.StatusMsg != statusError {
 				t.Errorf("CheckHealthWithReasons() status = %v, want 'error'", resp.StatusMsg)
 			}
 
-			if len(resp.CheckStatuses) != 1 || resp.CheckStatuses["process"].IsOk {
+			if len(resp.CheckStatuses) != 1 || resp.CheckStatuses[moduleProcess].IsOk {
 				t.Errorf("CheckHealthWithReasons() invalid error response structure")
 			}
 		})

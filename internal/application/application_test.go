@@ -18,6 +18,13 @@ import (
 	"go.uber.org/goleak"
 )
 
+const (
+	logMsgPolling = "Polling for "
+	testVersion   = "1.0.1"
+	flagKey       = "FLAG"
+	flagValTrue   = "true"
+)
+
 type MockUpdaterClient struct {
 	mock.Mock
 }
@@ -138,21 +145,21 @@ func TestApp_poll(t *testing.T) {
 				agent.On("GetServiceName").Return("test-agent")
 				agent.On("GetEnvironmentFilePath").Return("")
 			},
-			expectedLogMsg: "Polling for ",
+			expectedLogMsg: logMsgPolling,
 		},
 		{
 			name: "Successful poll with update",
 			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
 					Action:   agentmanager.Action_UPDATE,
-					Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+					Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: testVersion}},
 				}, nil)
 				agent.On("GetServiceName").Return("test-agent")
 				agent.On("GetEnvironmentFilePath").Return("")
 				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
-				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
+				agent.On("Update", mock.Anything, testVersion).Return(nil)
 			},
-			expectedLogMsg: "Polling for ",
+			expectedLogMsg: logMsgPolling,
 		},
 		{
 			name: "Successful poll with restart",
@@ -164,7 +171,7 @@ func TestApp_poll(t *testing.T) {
 				agent.On("GetEnvironmentFilePath").Return("")
 				agent.On("Restart").Return(nil)
 			},
-			expectedLogMsg: "Polling for ",
+			expectedLogMsg: logMsgPolling,
 		},
 		{
 			name: "Failed to send agent data",
@@ -206,11 +213,11 @@ func TestApp_Update(t *testing.T) {
 			setupMocks: func(agent *MockAgentData, oh *MockOSHelper) {
 				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
 				agent.On("GetServiceName").Return("test-agent")
-				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
+				agent.On("Update", mock.Anything, testVersion).Return(nil)
 			},
 			response: &agentmanager.GetVersionResponse{
 				Action:   agentmanager.Action_UPDATE,
-				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: testVersion}},
 			},
 			shouldUpdate: true,
 		},
@@ -221,7 +228,7 @@ func TestApp_Update(t *testing.T) {
 			},
 			response: &agentmanager.GetVersionResponse{
 				Action:   agentmanager.Action_UPDATE,
-				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: testVersion}},
 			},
 			shouldUpdate: false,
 		},
@@ -230,11 +237,11 @@ func TestApp_Update(t *testing.T) {
 			setupMocks: func(agent *MockAgentData, oh *MockOSHelper) {
 				oh.On("GetSystemUptime").Return(time.Duration(0), errors.New("uptime error"))
 				agent.On("GetServiceName").Return("test-agent")
-				agent.On("Update", mock.Anything, "1.0.1").Return(nil)
+				agent.On("Update", mock.Anything, testVersion).Return(nil)
 			},
 			response: &agentmanager.GetVersionResponse{
 				Action:   agentmanager.Action_UPDATE,
-				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: "1.0.1"}},
+				Response: &agentmanager.GetVersionResponse_Update{Update: &agentmanager.UpdateActionParams{Version: testVersion}},
 			},
 			shouldUpdate: true,
 		},
@@ -358,7 +365,7 @@ func TestGenerateEnvironmentFileContent(t *testing.T) {
 		},
 		{
 			name:  "single flag",
-			flags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
+			flags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": flagValTrue},
 			expected: header +
 				"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED=true\n",
 		},
@@ -366,7 +373,7 @@ func TestGenerateEnvironmentFileContent(t *testing.T) {
 			name: "multiple flags sorted",
 			flags: map[string]string{
 				"FEATURE_FLAG_Z_LAST":  "false",
-				"FEATURE_FLAG_A_FIRST": "true",
+				"FEATURE_FLAG_A_FIRST": flagValTrue,
 			},
 			expected: header +
 				"FEATURE_FLAG_A_FIRST=true\n" +
@@ -374,31 +381,31 @@ func TestGenerateEnvironmentFileContent(t *testing.T) {
 		},
 		{
 			name:  "value with spaces is quoted",
-			flags: map[string]string{"FLAG": "hello world"},
+			flags: map[string]string{flagKey: "hello world"},
 			expected: header +
 				"FLAG=\"hello world\"\n",
 		},
 		{
 			name:  "value with double quote is escaped",
-			flags: map[string]string{"FLAG": `say "hi"`},
+			flags: map[string]string{flagKey: `say "hi"`},
 			expected: header +
 				`FLAG="say \"hi\""` + "\n",
 		},
 		{
 			name:  "value with backslash is escaped",
-			flags: map[string]string{"FLAG": `a\b`},
+			flags: map[string]string{flagKey: `a\b`},
 			expected: header +
 				`FLAG="a\\b"` + "\n",
 		},
 		{
 			name:  "value with leading whitespace is quoted",
-			flags: map[string]string{"FLAG": " leading"},
+			flags: map[string]string{flagKey: " leading"},
 			expected: header +
 				"FLAG=\" leading\"\n",
 		},
 		{
 			name:     "simple value not quoted",
-			flags:    map[string]string{"FLAG": "simple"},
+			flags:    map[string]string{flagKey: "simple"},
 			expected: header + "FLAG=simple\n",
 		},
 	}
@@ -421,7 +428,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.False(t, restarted)
@@ -459,7 +466,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": "true"},
+			FeatureFlags: map[string]string{"FEATURE_FLAG_GPU_LOGS_COLLECTION_ENABLED": flagValTrue},
 		}, agent)
 
 		assert.True(t, restarted)
@@ -482,7 +489,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.False(t, restarted)
@@ -507,7 +514,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.False(t, restarted)
@@ -529,7 +536,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.False(t, restarted)
@@ -550,7 +557,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.True(t, restarted)
@@ -576,7 +583,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.True(t, restarted)
@@ -635,7 +642,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.False(t, restarted)
@@ -662,7 +669,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "new"},
+			FeatureFlags: map[string]string{flagKey: "new"},
 		}, agent)
 
 		assert.True(t, restarted)
@@ -687,7 +694,7 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		app := newTestApp(nil, oh)
 		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
-			FeatureFlags: map[string]string{"FLAG": "true"},
+			FeatureFlags: map[string]string{flagKey: flagValTrue},
 		}, agent)
 
 		assert.False(t, restarted)
@@ -772,32 +779,32 @@ func TestApp_validateFeatureFlags(t *testing.T) {
 		},
 		{
 			name:     "valid keys",
-			input:    map[string]string{"FEATURE_FLAG": "true", "_PRIVATE": "1", "a": "b"},
-			expected: map[string]string{"FEATURE_FLAG": "true", "_PRIVATE": "1", "a": "b"},
+			input:    map[string]string{"FEATURE_FLAG": flagValTrue, "_PRIVATE": "1", "a": "b"},
+			expected: map[string]string{"FEATURE_FLAG": flagValTrue, "_PRIVATE": "1", "a": "b"},
 		},
 		{
 			name:     "invalid key with space",
-			input:    map[string]string{"BAD KEY": "true", "GOOD_KEY": "val"},
+			input:    map[string]string{"BAD KEY": flagValTrue, "GOOD_KEY": "val"},
 			expected: map[string]string{"GOOD_KEY": "val"},
 		},
 		{
 			name:     "invalid key starting with digit",
-			input:    map[string]string{"1BAD": "true"},
+			input:    map[string]string{"1BAD": flagValTrue},
 			expected: map[string]string{},
 		},
 		{
 			name:     "invalid key with special chars",
-			input:    map[string]string{"BAD-KEY": "true", "BAD.KEY": "false"},
+			input:    map[string]string{"BAD-KEY": flagValTrue, "BAD.KEY": "false"},
 			expected: map[string]string{},
 		},
 		{
 			name:     "newline in value",
-			input:    map[string]string{"FLAG": "line1\nline2"},
+			input:    map[string]string{flagKey: "line1\nline2"},
 			expected: map[string]string{},
 		},
 		{
 			name:     "carriage return in value",
-			input:    map[string]string{"FLAG": "line1\rline2"},
+			input:    map[string]string{flagKey: "line1\rline2"},
 			expected: map[string]string{},
 		},
 		{
@@ -823,7 +830,7 @@ func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
 
 	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
 		Action:       agentmanager.Action_RESTART,
-		FeatureFlags: map[string]string{"NEW_FLAG": "true"},
+		FeatureFlags: map[string]string{"NEW_FLAG": flagValTrue},
 	}, nil)
 	agent.On("GetServiceName").Return("test-agent")
 	agent.On("GetEnvironmentFilePath").Return(envPath)
