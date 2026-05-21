@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	statusError   = "error"
+	moduleProcess = "process"
+)
+
 type Response struct {
 	StatusMsg     string                 `json:"status"`
 	UpSince       time.Time              `json:"upSince"`
@@ -30,10 +35,10 @@ type Parameter struct {
 
 func makeErrorResponse(message string) Response {
 	return Response{
-		StatusMsg: "error",
+		StatusMsg: statusError,
 		Reasons:   []string{message},
 		CheckStatuses: map[string]CheckStatus{
-			"process": {
+			moduleProcess: {
 				IsOk:    false,
 				Reasons: []string{message},
 			},
