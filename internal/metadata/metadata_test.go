@@ -21,6 +21,10 @@ const (
 	instanceDataPath   = "/v1/instance-data"
 	tokenAccessPath    = "/v1/iam/tsa/token/access_token"
 	tokenExpiresAtPath = "/v1/iam/tsa/token/expires_at"
+
+	instanceIDFile = "instance-id"
+	unreachableURL = "http://127.0.0.1:1"
+	tsaTokenType   = "tsa"
 )
 
 func testLogger() *slog.Logger {
@@ -62,7 +66,7 @@ func TestGetInstanceId_FromIMDS(t *testing.T) {
 	defer server.Close()
 
 	tmpDir := t.TempDir()
-	err := os.WriteFile(filepath.Join(tmpDir, "instance-id"), []byte("inst-from-file\n"), 0644)
+	err := os.WriteFile(filepath.Join(tmpDir, instanceIDFile), []byte("inst-from-file\n"), 0644)
 	require.NoError(t, err)
 
 	reader := NewReader(Config{
@@ -70,7 +74,7 @@ func TestGetInstanceId_FromIMDS(t *testing.T) {
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
 		Path:                       tmpDir,
-		InstanceIdFilename:         "instance-id",
+		InstanceIdFilename:         instanceIDFile,
 	}, testLogger())
 
 	// IMDS is primary when UseMetadataService is true; the file must not be touched.
@@ -82,15 +86,15 @@ func TestGetInstanceId_FromIMDS(t *testing.T) {
 
 func TestGetInstanceId_FileFallback_WhenIMDSFails(t *testing.T) {
 	tmpDir := t.TempDir()
-	err := os.WriteFile(filepath.Join(tmpDir, "instance-id"), []byte("inst-from-file\n"), 0644)
+	err := os.WriteFile(filepath.Join(tmpDir, instanceIDFile), []byte("inst-from-file\n"), 0644)
 	require.NoError(t, err)
 
 	reader := NewReader(Config{
 		UseMetadataService:         true,
-		MetadataServiceURL:         "http://127.0.0.1:1",
-		MetadataServiceFallbackURL: "http://127.0.0.1:1",
+		MetadataServiceURL:         unreachableURL,
+		MetadataServiceFallbackURL: unreachableURL,
 		Path:                       tmpDir,
-		InstanceIdFilename:         "instance-id",
+		InstanceIdFilename:         instanceIDFile,
 	}, testLogger())
 
 	instanceId, isFallback, err := reader.GetInstanceId()
@@ -113,10 +117,10 @@ func TestGetInstanceId_IMDSFallbackURL(t *testing.T) {
 	// Primary IMDS unreachable — uses fallback URL; still treated as IMDS, not a file fallback.
 	reader := NewReader(Config{
 		UseMetadataService:         true,
-		MetadataServiceURL:         "http://127.0.0.1:1",
+		MetadataServiceURL:         unreachableURL,
 		MetadataServiceFallbackURL: fallbackServer.URL,
 		Path:                       t.TempDir(),
-		InstanceIdFilename:         "instance-id",
+		InstanceIdFilename:         instanceIDFile,
 	}, testLogger())
 
 	instanceId, isFallback, err := reader.GetInstanceId()
@@ -146,7 +150,7 @@ func TestGetIamToken_IMDS(t *testing.T) {
 		UseMetadataService:         true,
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
-		MetadataTokenType:          "tsa",
+		MetadataTokenType:          tsaTokenType,
 	}, testLogger())
 
 	token, err := reader.GetIamToken()
@@ -176,7 +180,7 @@ func TestGetIamToken_Cached(t *testing.T) {
 		UseMetadataService:         true,
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
-		MetadataTokenType:          "tsa",
+		MetadataTokenType:          tsaTokenType,
 	}, testLogger())
 
 	// First call fetches from IMDS
@@ -214,7 +218,7 @@ func TestGetIamToken_RefreshesWhenNearExpiry(t *testing.T) {
 		UseMetadataService:         true,
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
-		MetadataTokenType:          "tsa",
+		MetadataTokenType:          tsaTokenType,
 	}, testLogger())
 
 	// First fetch
@@ -261,7 +265,7 @@ func TestGetIamToken_UsesStaleTokenOnRefreshFailure(t *testing.T) {
 		UseMetadataService:         true,
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
-		MetadataTokenType:          "tsa",
+		MetadataTokenType:          tsaTokenType,
 	}, testLogger())
 
 	// First fetch succeeds
@@ -304,7 +308,7 @@ func TestGetIamToken_AlreadyExpired(t *testing.T) {
 		UseMetadataService:         true,
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
-		MetadataTokenType:          "tsa",
+		MetadataTokenType:          tsaTokenType,
 		Path:                       tmpDir,
 		IamTokenFilename:           "tsa-token",
 	}, testLogger())
@@ -327,11 +331,11 @@ func TestGetIamToken_FileFallback(t *testing.T) {
 
 	reader := NewReader(Config{
 		UseMetadataService:         true,
-		MetadataServiceURL:         "http://127.0.0.1:1",
-		MetadataServiceFallbackURL: "http://127.0.0.1:1",
+		MetadataServiceURL:         unreachableURL,
+		MetadataServiceFallbackURL: unreachableURL,
 		Path:                       tmpDir,
 		IamTokenFilename:           "tsa-token",
-		MetadataTokenType:          "tsa",
+		MetadataTokenType:          tsaTokenType,
 	}, testLogger())
 
 	token, err := reader.GetIamToken()
@@ -448,13 +452,13 @@ func TestGetInstanceData_StaleCache_OnRefreshFailure(t *testing.T) {
 
 func TestGetInstanceId_MetadataServiceDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
-	err := os.WriteFile(filepath.Join(tmpDir, "instance-id"), []byte("inst-from-file\n"), 0644)
+	err := os.WriteFile(filepath.Join(tmpDir, instanceIDFile), []byte("inst-from-file\n"), 0644)
 	require.NoError(t, err)
 
 	reader := NewReader(Config{
 		UseMetadataService: false,
 		Path:               tmpDir,
-		InstanceIdFilename: "instance-id",
+		InstanceIdFilename: instanceIDFile,
 	}, testLogger())
 
 	instanceId, isFallback, err := reader.GetInstanceId()
