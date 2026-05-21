@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,6 +36,17 @@ const instanceDataCacheTTL = 5 * time.Minute
 // tokenRefreshMargin is how long before expiry we refresh the token
 const tokenRefreshMargin = 1 * time.Hour
 
+// maxPendingFileReads is the cap on leaked file-read goroutines. Once exceeded,
+// the process panics so systemd can restart it (Restart=always in the unit
+// file); the assumption is the mount is wedged and only a fresh process after
+// a remount will recover.
+const maxPendingFileReads = 100
+
+// fileReadTimeout bounds os.ReadFile calls so a hung mount (e.g. unresponsive
+// /mnt/cloud-metadata) cannot block the poll loop indefinitely. Declared as
+// var so tests can shorten it.
+var fileReadTimeout = 5 * time.Second
+
 type cachedToken struct {
 	token     string
 	expiresAt time.Time
@@ -51,6 +63,8 @@ type Reader struct {
 
 	tokenMu   sync.Mutex
 	cachedIAM *cachedToken
+
+	pendingFileReads atomic.Int64
 }
 
 func NewReader(cfg Config, logger *slog.Logger) *Reader {
@@ -73,20 +87,24 @@ func (r *Reader) GetParentId() (string, error) {
 }
 
 func (r *Reader) GetInstanceId() (instanceId string, isFallback bool, err error) {
-	instanceId, err = r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
-	if err == nil {
-		return instanceId, false, nil
-	}
-	r.logger.Warn("Failed to get instance_id from file, falling back to IMDS", "error", err)
-
 	if r.cfg.UseMetadataService {
 		data, imdsErr := r.getInstanceData()
 		if imdsErr == nil {
-			return data.ID, true, nil
+			return data.ID, false, nil
 		}
-		return "", true, fmt.Errorf("failed to get instance_id from file: %w and from IMDS: %w", err, imdsErr)
+		r.logger.Warn("Failed to get instance_id from IMDS, falling back to file", "error", imdsErr)
+		instanceId, fileErr := r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
+		if fileErr != nil {
+			return "", true, fmt.Errorf("failed to get instance_id from IMDS: %w and from file: %w", imdsErr, fileErr)
+		}
+		return instanceId, true, nil
 	}
-	return "", false, err
+
+	instanceId, err = r.readAndTrimFile(r.cfg.Path + "/" + r.cfg.InstanceIdFilename)
+	if err != nil {
+		return "", false, err
+	}
+	return instanceId, false, nil
 }
 
 func (r *Reader) GetIamToken() (string, error) {
@@ -221,11 +239,39 @@ func (r *Reader) doMetadataRequest(url string) ([]byte, error) {
 	return body, nil
 }
 
+// readAndTrimFile reads filename with a hard timeout so a hung mount cannot
+// block the caller. The underlying goroutine may leak until the syscall
+// eventually unblocks (or forever, if the mount never recovers); leaked
+// goroutines are counted, and if the cap is exceeded the process exits so
+// systemd can restart it on a (hopefully) recovered mount.
 func (r *Reader) readAndTrimFile(filename string) (string, error) {
 	r.logger.Debug("Reading file", "filename", filename)
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return "", err
+
+	inflight := r.pendingFileReads.Add(1)
+	if inflight > maxPendingFileReads {
+		r.logger.Error("too many leaked file-read goroutines, panicking for restart",
+			"pending", inflight, "threshold", maxPendingFileReads, "filename", filename)
+		panic(fmt.Sprintf("metadata: %d leaked file-read goroutines exceed cap %d (filename=%s)",
+			inflight, maxPendingFileReads, filename))
 	}
-	return strings.TrimSpace(string(content)), nil
+
+	type result struct {
+		content []byte
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		defer r.pendingFileReads.Add(-1)
+		content, err := os.ReadFile(filename)
+		ch <- result{content: content, err: err}
+	}()
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return "", res.err
+		}
+		return strings.TrimSpace(string(res.content)), nil
+	case <-time.After(fileReadTimeout):
+		return "", fmt.Errorf("timeout reading %s after %s", filename, fileReadTimeout)
+	}
 }

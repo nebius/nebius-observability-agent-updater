@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -47,24 +50,7 @@ func TestGetParentId_IMDS(t *testing.T) {
 	assert.Equal(t, "parent-456", parentId)
 }
 
-func TestGetInstanceId_FromFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	err := os.WriteFile(filepath.Join(tmpDir, "instance-id"), []byte("inst-from-file\n"), 0644)
-	require.NoError(t, err)
-
-	reader := NewReader(Config{
-		UseMetadataService: true,
-		Path:               tmpDir,
-		InstanceIdFilename: "instance-id",
-	}, testLogger())
-
-	instanceId, isFallback, err := reader.GetInstanceId()
-	require.NoError(t, err)
-	assert.Equal(t, "inst-from-file", instanceId)
-	assert.False(t, isFallback)
-}
-
-func TestGetInstanceId_IMDSFallback(t *testing.T) {
+func TestGetInstanceId_FromIMDS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == instanceDataPath {
 			_, err := w.Write([]byte(`{"id": "inst-from-imds", "parent_id": "parent-456"}`))
@@ -75,18 +61,41 @@ func TestGetInstanceId_IMDSFallback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// No file exists — falls back to IMDS
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "instance-id"), []byte("inst-from-file\n"), 0644)
+	require.NoError(t, err)
+
 	reader := NewReader(Config{
 		UseMetadataService:         true,
 		MetadataServiceURL:         server.URL,
 		MetadataServiceFallbackURL: server.URL,
-		Path:                       t.TempDir(),
+		Path:                       tmpDir,
+		InstanceIdFilename:         "instance-id",
+	}, testLogger())
+
+	// IMDS is primary when UseMetadataService is true; the file must not be touched.
+	instanceId, isFallback, err := reader.GetInstanceId()
+	require.NoError(t, err)
+	assert.Equal(t, "inst-from-imds", instanceId)
+	assert.False(t, isFallback)
+}
+
+func TestGetInstanceId_FileFallback_WhenIMDSFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "instance-id"), []byte("inst-from-file\n"), 0644)
+	require.NoError(t, err)
+
+	reader := NewReader(Config{
+		UseMetadataService:         true,
+		MetadataServiceURL:         "http://127.0.0.1:1",
+		MetadataServiceFallbackURL: "http://127.0.0.1:1",
+		Path:                       tmpDir,
 		InstanceIdFilename:         "instance-id",
 	}, testLogger())
 
 	instanceId, isFallback, err := reader.GetInstanceId()
 	require.NoError(t, err)
-	assert.Equal(t, "inst-from-imds", instanceId)
+	assert.Equal(t, "inst-from-file", instanceId)
 	assert.True(t, isFallback)
 }
 
@@ -101,10 +110,10 @@ func TestGetInstanceId_IMDSFallbackURL(t *testing.T) {
 	}))
 	defer fallbackServer.Close()
 
-	// No file exists, primary IMDS unreachable — falls back to IMDS fallback URL
+	// Primary IMDS unreachable — uses fallback URL; still treated as IMDS, not a file fallback.
 	reader := NewReader(Config{
 		UseMetadataService:         true,
-		MetadataServiceURL:         "http://127.0.0.1:1", // unreachable
+		MetadataServiceURL:         "http://127.0.0.1:1",
 		MetadataServiceFallbackURL: fallbackServer.URL,
 		Path:                       t.TempDir(),
 		InstanceIdFilename:         "instance-id",
@@ -113,7 +122,7 @@ func TestGetInstanceId_IMDSFallbackURL(t *testing.T) {
 	instanceId, isFallback, err := reader.GetInstanceId()
 	require.NoError(t, err)
 	assert.Equal(t, "inst-fallback", instanceId)
-	assert.True(t, isFallback)
+	assert.False(t, isFallback)
 }
 
 func TestGetIamToken_IMDS(t *testing.T) {
@@ -475,4 +484,66 @@ func TestIMDS_ServerError(t *testing.T) {
 	parentId, err := reader.GetParentId()
 	require.NoError(t, err)
 	assert.Equal(t, "parent-from-file", parentId)
+}
+
+// makeHangingFile returns a path to a FIFO that blocks os.ReadFile in open(2)
+// until a writer appears, which never happens in these tests — simulating a
+// hung mount.
+func makeHangingFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "hang")
+	require.NoError(t, syscall.Mkfifo(path, 0600))
+	return path
+}
+
+func TestReadAndTrimFile_TimesOutOnHungFile(t *testing.T) {
+	prev := fileReadTimeout
+	fileReadTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { fileReadTimeout = prev })
+
+	reader := NewReader(Config{}, testLogger())
+
+	start := time.Now()
+	_, err := reader.readAndTrimFile(makeHangingFile(t))
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timeout reading")
+	assert.Less(t, elapsed, time.Second, "should return shortly after timeout, not block")
+}
+
+func TestReadAndTrimFile_PanicsWhenLeakCapExceeded(t *testing.T) {
+	prev := fileReadTimeout
+	fileReadTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { fileReadTimeout = prev })
+
+	reader := NewReader(Config{}, testLogger())
+	hang := makeHangingFile(t)
+
+	// Saturate the cap by leaking maxPendingFileReads goroutines in parallel.
+	var wg sync.WaitGroup
+	var done atomic.Int64
+	for i := 0; i < maxPendingFileReads; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = reader.readAndTrimFile(hang)
+			done.Add(1)
+		}()
+	}
+	// Wait until all callers returned from their timeout select — the FIFO
+	// open never completes, so each one leaves a goroutine stuck on open(2).
+	require.Eventually(t, func() bool {
+		return done.Load() == int64(maxPendingFileReads)
+	}, 3*time.Second, 10*time.Millisecond)
+	wg.Wait()
+	require.EqualValues(t, maxPendingFileReads, reader.pendingFileReads.Load(),
+		"all read goroutines should still be in flight")
+
+	// The next call trips the cap and panics.
+	require.PanicsWithValue(t,
+		fmt.Sprintf("metadata: %d leaked file-read goroutines exceed cap %d (filename=%s)",
+			maxPendingFileReads+1, maxPendingFileReads, hang),
+		func() { _, _ = reader.readAndTrimFile(hang) },
+	)
 }
