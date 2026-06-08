@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -199,6 +201,9 @@ func (o OsHelper) UpdateRepo(scriptPath string) error {
 	return nil
 }
 
+// GetMk8sClusterId returns the cluster id, or "" if the file is absent or its
+// read fails. A read timeout is recorded by the shared FileGuard and surfaced
+// to the backend via FileGuard.DrainTimeouts, so it is not returned here.
 func (o OsHelper) GetMk8sClusterId(path string) string {
 	content, err := o.fileGuard.ReadFile(path, mk8sReadTimeout)
 	if err != nil {
@@ -211,6 +216,10 @@ func (o OsHelper) GetMk8sClusterId(path string) string {
 // before FileGuard panics for a restart.
 const DefaultMaxPendingFileOps = 100
 
+// ErrFileTimeout wraps every FileGuard timeout so callers can distinguish a
+// wedged disk (errors.Is(err, ErrFileTimeout)) from an ordinary file error.
+var ErrFileTimeout = errors.New("file operation timed out")
+
 // FileGuard bounds filesystem syscalls with a timeout so a wedged mount cannot
 // hang the caller. Each call runs its syscall in a goroutine counted in
 // pending; one that exceeds its timeout keeps running (and stays counted) until
@@ -222,10 +231,37 @@ const DefaultMaxPendingFileOps = 100
 type FileGuard struct {
 	pending atomic.Int64
 	max     int64
+
+	mu       sync.Mutex
+	timeouts map[string]struct{} // distinct paths that have timed out since the last drain
 }
 
 func NewFileGuard(maxPending int) *FileGuard {
-	return &FileGuard{max: int64(maxPending)}
+	return &FileGuard{max: int64(maxPending), timeouts: make(map[string]struct{})}
+}
+
+func (g *FileGuard) recordTimeout(path string) {
+	g.mu.Lock()
+	g.timeouts[path] = struct{}{}
+	g.mu.Unlock()
+}
+
+// DrainTimeouts returns the distinct paths whose access timed out since the
+// previous call, sorted, and clears the record. Callers use it to report a
+// wedged disk to the backend once per cycle rather than per failed read.
+func (g *FileGuard) DrainTimeouts() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.timeouts) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(g.timeouts))
+	for p := range g.timeouts {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	g.timeouts = make(map[string]struct{})
+	return paths
 }
 
 // guarded runs fn in a goroutine and returns either its result or a timeout
@@ -251,8 +287,9 @@ func guarded[T any](g *FileGuard, path string, timeout time.Duration, fn func() 
 	case res := <-ch:
 		return res.val, res.err
 	case <-time.After(timeout):
+		g.recordTimeout(path)
 		var zero T
-		return zero, fmt.Errorf("timeout on %s after %s", path, timeout)
+		return zero, fmt.Errorf("timeout on %s after %s: %w", path, timeout, ErrFileTimeout)
 	}
 }
 

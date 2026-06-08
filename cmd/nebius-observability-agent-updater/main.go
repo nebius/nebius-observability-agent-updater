@@ -40,7 +40,7 @@ func run() int {
 	fileGuard := osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps)
 	oh := osutils.NewOsHelper(fileGuard)
 	dh := dcgm.NewDcgmHelper()
-	cli, err := client.New(metadataReader, oh, dh, cfg, logger, metadataReader.GetIamToken)
+	cli, err := client.New(metadataReader, oh, dh, fileGuard, cfg, logger, metadataReader.GetIamToken)
 	if err != nil {
 		logger.Error("failed to create client", "error", err)
 		return 1

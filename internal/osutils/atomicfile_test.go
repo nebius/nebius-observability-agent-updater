@@ -101,13 +101,15 @@ func TestFileGuard_PanicsWhenLeakCapExceeded(t *testing.T) {
 }
 
 // TestGetMk8sClusterId_DoesNotHangOnWedgedFile points the read at a writer-less
-// FIFO; GetMk8sClusterId must return "" shortly after the timeout, not block.
+// FIFO; GetMk8sClusterId must return "" shortly after the timeout, not block,
+// and the guard must record the path for later reporting.
 func TestGetMk8sClusterId_DoesNotHangOnWedgedFile(t *testing.T) {
 	prev := mk8sReadTimeout
 	mk8sReadTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { mk8sReadTimeout = prev })
 
-	o := NewOsHelper(NewFileGuard(DefaultMaxPendingFileOps))
+	g := NewFileGuard(DefaultMaxPendingFileOps)
+	o := NewOsHelper(g)
 	fifo := makeFifo(t)
 
 	done := make(chan string, 1)
@@ -120,6 +122,30 @@ func TestGetMk8sClusterId_DoesNotHangOnWedgedFile(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("GetMk8sClusterId hung on wedged file")
+	}
+
+	if paths := g.DrainTimeouts(); len(paths) != 1 || paths[0] != fifo {
+		t.Fatalf("expected DrainTimeouts to report %q, got %v", fifo, paths)
+	}
+}
+
+func TestFileGuard_DrainTimeouts(t *testing.T) {
+	g := NewFileGuard(DefaultMaxPendingFileOps)
+	if got := g.DrainTimeouts(); got != nil {
+		t.Fatalf("expected nil before any timeout, got %v", got)
+	}
+
+	fifo := makeFifo(t)
+	_, _ = g.ReadFile(fifo, 50*time.Millisecond)
+	_, _ = g.ReadFile(fifo, 50*time.Millisecond) // same path, deduped
+
+	paths := g.DrainTimeouts()
+	if len(paths) != 1 || paths[0] != fifo {
+		t.Fatalf("expected [%q], got %v", fifo, paths)
+	}
+	// Draining clears the record.
+	if got := g.DrainTimeouts(); got != nil {
+		t.Fatalf("expected nil after drain, got %v", got)
 	}
 }
 
