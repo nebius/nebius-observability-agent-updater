@@ -172,6 +172,15 @@ func (m *mockAgentData) GetLastUpdateError() error {
 	args := m.Called()
 	return args.Error(0)
 }
+
+func (m *mockAgentData) GetLastSeenConfigVersion() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
+}
+
+func (m *mockAgentData) SetLastSeenConfigVersion(version uint64) {
+	m.Called(version)
+}
 func TestNew(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
@@ -233,6 +242,7 @@ func TestSendAgentData(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -323,6 +333,7 @@ func TestFillRequest(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(42))
 	agentData.On("IsAgentHealthy").Return(true, healthResponse)
 	agentData.On("GetLastUpdateError").Return(fmt.Errorf("some-error"))
 
@@ -330,6 +341,7 @@ func TestFillRequest(t *testing.T) {
 
 	assert.NotNil(t, req)
 	assert.Equal(t, agentmanager.AgentType_O11Y_AGENT, req.Type)
+	assert.Equal(t, uint64(42), req.LastSeenConfigVersion)
 	assert.Equal(t, "1.0.0", req.AgentVersion)
 	assert.Equal(t, "1.0.0", req.UpdaterVersion)
 	assert.Equal(t, "parent-123", req.ParentId)
@@ -423,6 +435,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -490,6 +503,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -527,6 +541,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 

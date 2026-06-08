@@ -400,6 +400,7 @@ func (s *Client) fillHealthCheckLogsInfo(req *agentmanager.GetVersionRequest) {
 func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
 	req := agentmanager.GetVersionRequest{}
 	req.Type = agent.GetAgentType()
+	req.LastSeenConfigVersion = agent.GetLastSeenConfigVersion()
 
 	s.fillVersionInfo(&req, agent)
 	s.fillMetadataInfo(&req)

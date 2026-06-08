@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/host"
@@ -15,11 +17,17 @@ import (
 )
 
 type OsHelper struct {
+	fileGuard *FileGuard
 }
 
-func NewOsHelper() *OsHelper {
-	return &OsHelper{}
+func NewOsHelper(fileGuard *FileGuard) *OsHelper {
+	return &OsHelper{fileGuard: fileGuard}
 }
+
+// mk8sReadTimeout bounds the mk8s-cluster-id file read in GetMk8sClusterId so an
+// unresponsive disk cannot hang the poll loop. Declared as var so tests can
+// shorten it.
+var mk8sReadTimeout = 5 * time.Second
 
 var ErrDebNotFound = fmt.Errorf("package not found")
 
@@ -192,11 +200,119 @@ func (o OsHelper) UpdateRepo(scriptPath string) error {
 }
 
 func (o OsHelper) GetMk8sClusterId(path string) string {
-	content, err := os.ReadFile(path)
+	content, err := o.fileGuard.ReadFile(path, mk8sReadTimeout)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(content))
+}
+
+// DefaultMaxPendingFileOps caps how many file-op goroutines may be in flight
+// before FileGuard panics for a restart.
+const DefaultMaxPendingFileOps = 100
+
+// FileGuard bounds filesystem syscalls with a timeout so a wedged mount cannot
+// hang the caller. Each call runs its syscall in a goroutine counted in
+// pending; one that exceeds its timeout keeps running (and stays counted) until
+// the syscall finally unblocks. On a wedged mount these accumulate, so when the
+// in-flight count exceeds the cap FileGuard panics: the mount is assumed wedged
+// and a process restart is the only chance of recovery. A single instance is
+// shared across all callers so the cap bounds the whole process, not one call
+// site.
+type FileGuard struct {
+	pending atomic.Int64
+	max     int64
+}
+
+func NewFileGuard(maxPending int) *FileGuard {
+	return &FileGuard{max: int64(maxPending)}
+}
+
+// guarded runs fn in a goroutine and returns either its result or a timeout
+// error. A timed-out goroutine keeps running until its syscall unblocks, so it
+// stays counted in pending; once the in-flight count exceeds the cap the
+// process panics for a restart.
+func guarded[T any](g *FileGuard, path string, timeout time.Duration, fn func() (T, error)) (T, error) {
+	if inflight := g.pending.Add(1); inflight > g.max {
+		g.pending.Add(-1) // this call never spawns its goroutine; don't count it
+		panic(fmt.Sprintf("osutils: %d in-flight file-op goroutines exceed cap %d (path=%s)", inflight, g.max, path))
+	}
+	type result struct {
+		val T
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		defer g.pending.Add(-1)
+		val, err := fn()
+		ch <- result{val: val, err: err}
+	}()
+	select {
+	case res := <-ch:
+		return res.val, res.err
+	case <-time.After(timeout):
+		var zero T
+		return zero, fmt.Errorf("timeout on %s after %s", path, timeout)
+	}
+}
+
+// ReadFile reads path with a timeout. The returned error preserves os.ReadFile's
+// error on the non-timeout path, so os.IsNotExist still works.
+func (g *FileGuard) ReadFile(path string, timeout time.Duration) ([]byte, error) {
+	return guarded(g, path, timeout, func() ([]byte, error) { return os.ReadFile(path) })
+}
+
+// Stat stats path with a timeout, preserving os.Stat's error on the non-timeout
+// path so os.IsNotExist still works.
+func (g *FileGuard) Stat(path string, timeout time.Duration) (os.FileInfo, error) {
+	return guarded(g, path, timeout, func() (os.FileInfo, error) { return os.Stat(path) })
+}
+
+// WriteFileAtomic runs the atomic write with a timeout.
+func (g *FileGuard) WriteFileAtomic(path string, data []byte, perm os.FileMode, timeout time.Duration) error {
+	_, err := guarded(g, path, timeout, func() (struct{}, error) {
+		return struct{}{}, WriteFileAtomic(path, data, perm)
+	})
+	return err
+}
+
+// WriteFileAtomic writes data to a temp file in the same directory, fsyncs it,
+// then renames it to the target path so readers never see partial content.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	defer func() {
+		// Clean up temp file on any failure.
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	tmpPath = "" // rename succeeded, nothing to clean up
+	return nil
 }
 
 func (o OsHelper) GetDirectorySize(path string) (int64, error) {
