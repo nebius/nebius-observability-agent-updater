@@ -231,7 +231,7 @@ func TestSendAgentData(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -286,7 +286,7 @@ func TestFillRequest(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -420,7 +420,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -496,7 +496,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -562,7 +562,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)

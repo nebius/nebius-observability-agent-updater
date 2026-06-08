@@ -216,10 +216,6 @@ func (o OsHelper) GetMk8sClusterId(path string) string {
 // before FileGuard panics for a restart.
 const DefaultMaxPendingFileOps = 100
 
-// ErrFileTimeout wraps every FileGuard timeout so callers can distinguish a
-// wedged disk (errors.Is(err, ErrFileTimeout)) from an ordinary file error.
-var ErrFileTimeout = errors.New("file operation timed out")
-
 // FileGuard bounds filesystem syscalls with a timeout so a wedged mount cannot
 // hang the caller. Each call runs its syscall in a goroutine counted in
 // pending; one that exceeds its timeout keeps running (and stays counted) until
@@ -232,8 +228,10 @@ type FileGuard struct {
 	pending atomic.Int64
 	max     int64
 
-	mu       sync.Mutex
-	timeouts map[string]struct{} // distinct paths that have timed out since the last drain
+	mu sync.Mutex
+	// distinct paths that have timed out since the last drain; bounded by the
+	// fixed set of guarded call sites, not by call frequency.
+	timeouts map[string]struct{}
 }
 
 func NewFileGuard(maxPending int) *FileGuard {
@@ -289,7 +287,7 @@ func guarded[T any](g *FileGuard, path string, timeout time.Duration, fn func() 
 	case <-time.After(timeout):
 		g.recordTimeout(path)
 		var zero T
-		return zero, fmt.Errorf("timeout on %s after %s: %w", path, timeout, ErrFileTimeout)
+		return zero, fmt.Errorf("timeout on %s after %s", path, timeout)
 	}
 }
 
