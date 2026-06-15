@@ -13,6 +13,7 @@ import (
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
 	"github.com/nebius/nebius-observability-agent-updater/internal/healthcheck"
+	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/goleak"
@@ -84,6 +85,15 @@ func (m *MockAgentData) Restart() error {
 	return args.Error(0)
 }
 
+func (m *MockAgentData) GetLastSeenConfigVersion() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
+}
+
+func (m *MockAgentData) SetLastSeenConfigVersion(version uint64) {
+	m.Called(version)
+}
+
 type MockOSHelper struct {
 	mock.Mock
 }
@@ -100,10 +110,11 @@ func (m *MockOSHelper) GetServiceUptime(serviceName string) (time.Duration, erro
 
 func newTestApp(client updaterClient, oh oshelper) *App {
 	return &App{
-		client: client,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		config: config.GetDefaultConfig(),
-		oh:     oh,
+		client:    client,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config:    config.GetDefaultConfig(),
+		oh:        oh,
+		fileGuard: osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps),
 	}
 }
 
@@ -121,8 +132,9 @@ func TestApp_New(t *testing.T) {
 	logger := slog.Default()
 	agents := []agents.AgentData{&MockAgentData{}}
 	oh := &MockOSHelper{}
+	fileGuard := osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps)
 
-	app := New(cfg, client, logger, agents, oh)
+	app := New(cfg, client, logger, agents, oh, fileGuard)
 
 	assert.NotNil(t, app)
 	assert.Equal(t, cfg, app.config)
@@ -130,6 +142,7 @@ func TestApp_New(t *testing.T) {
 	assert.Equal(t, logger, app.logger)
 	assert.Equal(t, agents, app.agents)
 	assert.Equal(t, oh, app.oh)
+	assert.Equal(t, fileGuard, app.fileGuard)
 }
 
 func TestApp_poll(t *testing.T) {
@@ -144,6 +157,7 @@ func TestApp_poll(t *testing.T) {
 				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 				agent.On("GetServiceName").Return("test-agent")
 				agent.On("GetEnvironmentFilePath").Return("")
+				agent.On("GetLastSeenConfigVersion").Return(uint64(0))
 			},
 			expectedLogMsg: logMsgPolling,
 		},
@@ -158,6 +172,7 @@ func TestApp_poll(t *testing.T) {
 				agent.On("GetEnvironmentFilePath").Return("")
 				oh.On("GetSystemUptime").Return(20*time.Minute, nil)
 				agent.On("Update", mock.Anything, testVersion).Return(nil)
+				agent.On("GetLastSeenConfigVersion").Return(uint64(0))
 			},
 			expectedLogMsg: logMsgPolling,
 		},
@@ -170,6 +185,34 @@ func TestApp_poll(t *testing.T) {
 				agent.On("GetServiceName").Return("test-agent")
 				agent.On("GetEnvironmentFilePath").Return("")
 				agent.On("Restart").Return(nil)
+				agent.On("GetLastSeenConfigVersion").Return(uint64(0))
+			},
+			expectedLogMsg: logMsgPolling,
+		},
+		{
+			name: "Stores config version from response",
+			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
+				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
+					Action:        agentmanager.Action_NOP,
+					ConfigVersion: 7,
+				}, nil)
+				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
+				agent.On("GetLastSeenConfigVersion").Return(uint64(0))
+				agent.On("SetLastSeenConfigVersion", uint64(7)).Return()
+			},
+			expectedLogMsg: logMsgPolling,
+		},
+		{
+			name: "Does not store config version that is not newer",
+			setupMocks: func(client *MockUpdaterClient, agent *MockAgentData, oh *MockOSHelper) {
+				client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{
+					Action:        agentmanager.Action_NOP,
+					ConfigVersion: 7,
+				}, nil)
+				agent.On("GetServiceName").Return("test-agent")
+				agent.On("GetEnvironmentFilePath").Return("")
+				agent.On("GetLastSeenConfigVersion").Return(uint64(7))
 			},
 			expectedLogMsg: logMsgPolling,
 		},
@@ -325,9 +368,10 @@ func TestApp_Run(t *testing.T) {
 
 	agent.On("GetServiceName").Return("test-agent")
 	agent.On("GetEnvironmentFilePath").Return("")
+	agent.On("GetLastSeenConfigVersion").Return(uint64(0))
 	client.On("SendAgentData", mock.Anything).Return(&agentmanager.GetVersionResponse{Action: agentmanager.Action_NOP}, nil)
 
-	app := New(cfg, client, logger, []agents.AgentData{agent}, oh)
+	app := New(cfg, client, logger, []agents.AgentData{agent}, oh, osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -433,6 +477,29 @@ func TestApp_processFeatureFlags(t *testing.T) {
 
 		assert.False(t, restarted)
 		agent.AssertExpectations(t)
+		oh.AssertExpectations(t)
+	})
+
+	t.Run("feature flags unavailable keeps current flag set", func(t *testing.T) {
+		agent := &MockAgentData{}
+		oh := &MockOSHelper{}
+		envPath := t.TempDir() + "/environment"
+
+		writeEnvFile(t, envPath, header+"FLAG=true\n", time.Now().Add(-1*time.Hour))
+
+		agent.On("GetServiceName").Return("test-agent")
+
+		app := newTestApp(nil, oh)
+		restarted := app.processFeatureFlags(&agentmanager.GetVersionResponse{
+			FeatureFlagsUnavailable: true,
+		}, agent)
+
+		assert.False(t, restarted)
+		agent.AssertNotCalled(t, "GetEnvironmentFilePath")
+		agent.AssertNotCalled(t, "Restart")
+		content, err := os.ReadFile(envPath)
+		assert.NoError(t, err)
+		assert.Equal(t, header+"FLAG=true\n", string(content), "existing flag file must be left untouched")
 		oh.AssertExpectations(t)
 	})
 
@@ -834,6 +901,7 @@ func TestApp_poll_restart_with_feature_flag_change(t *testing.T) {
 	}, nil)
 	agent.On("GetServiceName").Return("test-agent")
 	agent.On("GetEnvironmentFilePath").Return(envPath)
+	agent.On("GetLastSeenConfigVersion").Return(uint64(0))
 	oh.On("GetServiceUptime", "test-agent").Return(20*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
 	agent.On("Restart").Return(nil).Once()

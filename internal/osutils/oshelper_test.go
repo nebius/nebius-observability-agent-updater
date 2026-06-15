@@ -9,7 +9,7 @@ import (
 )
 
 func TestGetDebPackageVersion(t *testing.T) {
-	o := NewOsHelper()
+	o := NewOsHelper(NewFileGuard(DefaultMaxPendingFileOps))
 	// Check if dpkg is available
 	_, err := exec.LookPath("dpkg-query")
 	if err != nil {
@@ -64,7 +64,7 @@ func TestGetDebPackageVersion(t *testing.T) {
 }
 
 func TestGetDirectorySize(t *testing.T) {
-	o := NewOsHelper()
+	o := NewOsHelper(NewFileGuard(DefaultMaxPendingFileOps))
 
 	// Check if du is available
 	_, err := exec.LookPath("du")
@@ -153,7 +153,7 @@ func TestGetDirectorySize(t *testing.T) {
 }
 
 func TestGetMountpointSize(t *testing.T) {
-	o := NewOsHelper()
+	o := NewOsHelper(NewFileGuard(DefaultMaxPendingFileOps))
 
 	// Check if df is available
 	_, err := exec.LookPath("df")

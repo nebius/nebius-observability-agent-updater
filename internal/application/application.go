@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,16 +15,18 @@ import (
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
 	"github.com/nebius/nebius-observability-agent-updater/internal/agents"
 	"github.com/nebius/nebius-observability-agent-updater/internal/config"
+	"github.com/nebius/nebius-observability-agent-updater/internal/osutils"
 )
 
 var validEnvKeyRegexp = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type App struct {
-	config *config.Config
-	client updaterClient
-	logger *slog.Logger
-	agents []agents.AgentData
-	oh     oshelper
+	config    *config.Config
+	client    updaterClient
+	logger    *slog.Logger
+	agents    []agents.AgentData
+	oh        oshelper
+	fileGuard *osutils.FileGuard
 }
 
 const (
@@ -33,6 +34,11 @@ const (
 	// restartGracePeriod prevents spurious restarts when file mtime is close to agent start time.
 	restartGracePeriod = 30 * time.Second
 )
+
+// envFileIOTimeout bounds the feature-flag env file read/stat/write so an
+// unresponsive disk cannot hang the poll loop. Declared as var so tests can
+// shorten it.
+var envFileIOTimeout = 5 * time.Second
 
 type updaterClient interface {
 	SendAgentData(agent agents.AgentData) (*agentmanager.GetVersionResponse, error)
@@ -44,8 +50,8 @@ type oshelper interface {
 	GetServiceUptime(serviceName string) (time.Duration, error)
 }
 
-func New(config *config.Config, client updaterClient, logger *slog.Logger, agents []agents.AgentData, oh oshelper) *App {
-	app := &App{config: config, client: client, logger: logger, agents: agents, oh: oh}
+func New(config *config.Config, client updaterClient, logger *slog.Logger, agents []agents.AgentData, oh oshelper, fileGuard *osutils.FileGuard) *App {
+	app := &App{config: config, client: client, logger: logger, agents: agents, oh: oh, fileGuard: fileGuard}
 	return app
 }
 
@@ -65,6 +71,10 @@ func (s *App) poll(agent agents.AgentData) {
 	}
 	if response.Action == agentmanager.Action_RESTART && !restarted {
 		s.Restart(agent)
+	}
+
+	if cv := response.GetConfigVersion(); cv > agent.GetLastSeenConfigVersion() {
+		agent.SetLastSeenConfigVersion(cv)
 	}
 }
 
@@ -96,45 +106,6 @@ func (s *App) Restart(agent agents.AgentData) {
 		s.logger.Error("Failed to restart agent", "error", err)
 		return
 	}
-}
-
-// atomicWriteFile writes data to a temp file in the same directory, fsyncs it,
-// then renames it to the target path so readers never see partial content.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-
-	defer func() {
-		// Clean up temp file on any failure.
-		if tmpPath != "" {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	tmpPath = "" // rename succeeded, nothing to clean up
-	return nil
 }
 
 // needsQuoting returns true if a value contains characters that require
@@ -209,6 +180,11 @@ func (s *App) validateFeatureFlags(flags map[string]string) map[string]string {
 }
 
 func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, agent agents.AgentData) bool {
+	if response.GetFeatureFlagsUnavailable() {
+		s.logger.Warn("Server reports feature flags unavailable, keeping current flag set", "agent", agent.GetServiceName())
+		return false
+	}
+
 	envPath := agent.GetEnvironmentFilePath()
 	if envPath == "" {
 		return false
@@ -217,7 +193,7 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 	featureFlags := s.validateFeatureFlags(response.GetFeatureFlags())
 	newContent := generateEnvironmentFileContent(featureFlags)
 
-	existingContent, err := os.ReadFile(envPath)
+	existingContent, err := s.fileGuard.ReadFile(envPath, envFileIOTimeout)
 	fileExists := err == nil
 	if err != nil && !os.IsNotExist(err) {
 		s.logger.Error("Failed to read environment file", "error", err, "path", envPath)
@@ -232,13 +208,13 @@ func (s *App) processFeatureFlags(response *agentmanager.GetVersionResponse, age
 
 	if stripComments(string(existingContent)) != stripComments(newContent) {
 		s.logger.Info("Feature flags changed, updating environment file", "agent", agent.GetServiceName(), "path", envPath)
-		if err := atomicWriteFile(envPath, []byte(newContent), 0640); err != nil {
+		if err := s.fileGuard.WriteFileAtomic(envPath, []byte(newContent), 0640, envFileIOTimeout); err != nil {
 			s.logger.Error("Failed to write environment file", "error", err, "path", envPath)
 			return false
 		}
 	}
 
-	fileInfo, err := os.Stat(envPath)
+	fileInfo, err := s.fileGuard.Stat(envPath, envFileIOTimeout)
 	if err != nil {
 		s.logger.Error("Failed to stat environment file", "error", err, "path", envPath)
 		return false

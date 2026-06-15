@@ -37,15 +37,16 @@ func run() int {
 	}
 	logger := loggerhelper.InitLogger(&cfg.Logger)
 	metadataReader := metadata.NewReader(cfg.Metadata, logger)
-	oh := osutils.NewOsHelper()
+	fileGuard := osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps)
+	oh := osutils.NewOsHelper(fileGuard)
 	dh := dcgm.NewDcgmHelper()
-	cli, err := client.New(metadataReader, oh, dh, cfg, logger, metadataReader.GetIamToken)
+	cli, err := client.New(metadataReader, oh, dh, fileGuard, cfg, logger, metadataReader.GetIamToken)
 	if err != nil {
 		logger.Error("failed to create client", "error", err)
 		return 1
 	}
-	agentsList := []agents.AgentData{agents.NewO11yagent()}
-	app := application.New(cfg, cli, logger, agentsList, oh)
+	agentsList := []agents.AgentData{agents.NewO11yagent(cfg.StateDir, logger, fileGuard)}
+	app := application.New(cfg, cli, logger, agentsList, oh, fileGuard)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

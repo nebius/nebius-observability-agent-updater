@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -94,11 +95,12 @@ type Client struct {
 	logger           *slog.Logger
 	oh               oshelper
 	dh               dcgmhelper
+	fileGuard        *osutils.FileGuard
 	retryBackoff     backoff.BackOff
 	getTokenCallback func() (string, error)
 }
 
-func New(metadata metadataReader, oh oshelper, dh dcgmhelper, config *config.Config, logger *slog.Logger, getTokenCallback func() (string, error)) (*Client, error) {
+func New(metadata metadataReader, oh oshelper, dh dcgmhelper, fileGuard *osutils.FileGuard, config *config.Config, logger *slog.Logger, getTokenCallback func() (string, error)) (*Client, error) {
 	if config.GRPC.Endpoint == "" {
 		endpoint := os.Getenv(ENDPOINT_ENV)
 		if endpoint == "" {
@@ -136,6 +138,7 @@ func New(metadata metadataReader, oh oshelper, dh dcgmhelper, config *config.Con
 		logger:           logger,
 		oh:               oh,
 		dh:               dh,
+		fileGuard:        fileGuard,
 		retryBackoff:     getRetryBackoff(config.GRPC.Retry),
 		getTokenCallback: getTokenCallback,
 	}, nil
@@ -400,6 +403,7 @@ func (s *Client) fillHealthCheckLogsInfo(req *agentmanager.GetVersionRequest) {
 func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionRequest {
 	req := agentmanager.GetVersionRequest{}
 	req.Type = agent.GetAgentType()
+	req.LastSeenConfigVersion = agent.GetLastSeenConfigVersion()
 
 	s.fillVersionInfo(&req, agent)
 	s.fillMetadataInfo(&req)
@@ -407,12 +411,16 @@ func (s *Client) fillRequest(agent agents.AgentData) *agentmanager.GetVersionReq
 	s.fillHealthInfo(&req, agent)
 	s.fillUptimeInfo(&req, agent)
 
-	lastError := agent.GetLastUpdateError()
-	if lastError != nil {
-		req.LastUpdateError = lastError.Error()
-	}
-
 	req.Mk8SClusterId = s.oh.GetMk8sClusterId(s.config.Mk8sClusterIdPath)
+
+	var parts []string
+	for _, path := range s.fileGuard.DrainTimeouts() {
+		parts = append(parts, "disk unavailable: "+path)
+	}
+	if lastError := agent.GetLastUpdateError(); lastError != nil {
+		parts = append(parts, lastError.Error())
+	}
+	req.LastUpdateError = strings.Join(parts, "\n")
 
 	cloudInitStatus, err := s.oh.GetSystemdStatus(constants.CloudInitServiceName)
 	if err != nil {

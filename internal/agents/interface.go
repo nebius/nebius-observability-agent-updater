@@ -14,4 +14,6 @@ type AgentData interface {
 	Update(updateRepoScriptPath string, version string) error
 	GetLastUpdateError() error
 	Restart() error
+	GetLastSeenConfigVersion() uint64
+	SetLastSeenConfigVersion(version uint64)
 }

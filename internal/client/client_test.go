@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -172,6 +174,15 @@ func (m *mockAgentData) GetLastUpdateError() error {
 	args := m.Called()
 	return args.Error(0)
 }
+
+func (m *mockAgentData) GetLastSeenConfigVersion() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
+}
+
+func (m *mockAgentData) SetLastSeenConfigVersion(version uint64) {
+	m.Called(version)
+}
 func TestNew(t *testing.T) {
 	metadata := &mockMetadataReader{}
 	oh := &mockOSHelper{}
@@ -183,7 +194,7 @@ func TestNew(t *testing.T) {
 		},
 	}
 	dh := &mockDcgmHelper{}
-	client, err := New(metadata, oh, dh, &cfg, nil, tokenFunc)
+	client, err := New(metadata, oh, dh, osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps), &cfg, nil, tokenFunc)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.conn)
@@ -200,6 +211,7 @@ func TestSendAgentData(t *testing.T) {
 		metadata:     metadata,
 		oh:           oh,
 		dh:           dh,
+		fileGuard:    osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps),
 		client:       mockClient,
 		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		config: &config.Config{
@@ -219,7 +231,7 @@ func TestSendAgentData(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -233,6 +245,7 @@ func TestSendAgentData(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -258,6 +271,7 @@ func TestFillRequest(t *testing.T) {
 		metadata:     metadata,
 		oh:           oh,
 		dh:           dh,
+		fileGuard:    osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps),
 		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		config:       &config.Config{},
@@ -272,7 +286,7 @@ func TestFillRequest(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId", mock.Anything).Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -323,6 +337,7 @@ func TestFillRequest(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(42))
 	agentData.On("IsAgentHealthy").Return(true, healthResponse)
 	agentData.On("GetLastUpdateError").Return(fmt.Errorf("some-error"))
 
@@ -330,6 +345,7 @@ func TestFillRequest(t *testing.T) {
 
 	assert.NotNil(t, req)
 	assert.Equal(t, agentmanager.AgentType_O11Y_AGENT, req.Type)
+	assert.Equal(t, uint64(42), req.LastSeenConfigVersion)
 	assert.Equal(t, "1.0.0", req.AgentVersion)
 	assert.Equal(t, "1.0.0", req.UpdaterVersion)
 	assert.Equal(t, "parent-123", req.ParentId)
@@ -376,10 +392,11 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	mockClient := &mockVersionServiceClient{}
 
 	client := &Client{
-		metadata: metadata,
-		oh:       oh,
-		dh:       dh,
-		client:   mockClient,
+		metadata:  metadata,
+		oh:        oh,
+		dh:        dh,
+		fileGuard: osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps),
+		client:    mockClient,
 		config: &config.Config{
 			GRPC: clientconfig.GRPCConfig{
 				Timeout: 5 * time.Second,
@@ -403,7 +420,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -423,6 +440,7 @@ func TestSendAgentDataWithRetry(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -448,10 +466,11 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	mockClient := &mockVersionServiceClient{}
 
 	client := &Client{
-		metadata: metadata,
-		oh:       oh,
-		dh:       dh,
-		client:   mockClient,
+		metadata:  metadata,
+		oh:        oh,
+		dh:        dh,
+		fileGuard: osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps),
+		client:    mockClient,
 		config: &config.Config{
 			GRPC: clientconfig.GRPCConfig{
 				Timeout: 5 * time.Second,
@@ -477,7 +496,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	oh.On("GetOsName").Return("Linux", nil)
 	oh.On("GetUname").Return("Linux 5.4.0-generic", nil)
 	oh.On("GetArch").Return("x86_64", nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -490,6 +509,7 @@ func TestSendAgentDataWithRetryFailure(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -518,6 +538,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 		metadata:     metadata,
 		oh:           oh,
 		dh:           dh,
+		fileGuard:    osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps),
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
 		config:       &config.Config{},
@@ -527,6 +548,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	agentData.On("GetServiceName").Return("test-agent")
 	agentData.On("GetDebPackageName").Return("test-agent-package")
 	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
 	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
 	agentData.On("GetLastUpdateError").Return(nil)
 
@@ -540,7 +562,7 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	oh.On("GetArch").Return("x86_64", nil)
 	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
 	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
-	oh.On("GetMk8sClusterId").Return("abcd", nil)
+	oh.On("GetMk8sClusterId").Return("abcd")
 
 	dh.On("GetDCGMVersion").Return("3.3.7", nil)
 	dh.On("GetGpuInfo").Return("NVIDIA H200", 2, nil)
@@ -555,4 +577,77 @@ func TestFillRequestDebNotFound(t *testing.T) {
 	metadata.AssertExpectations(t)
 	oh.AssertExpectations(t)
 	agentData.AssertExpectations(t)
+}
+
+func fillRequestWithGuard(guard *osutils.FileGuard, lastUpdateErr error) *agentmanager.GetVersionRequest {
+	metadata := &mockMetadataReader{}
+	oh := &mockOSHelper{}
+	dh := &mockDcgmHelper{}
+	c := &Client{
+		metadata:     metadata,
+		oh:           oh,
+		dh:           dh,
+		fileGuard:    guard,
+		retryBackoff: getRetryBackoff(clientconfig.GetDefaultRetryConfig()),
+		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		config:       &config.Config{},
+	}
+	metadata.On("GetParentId").Return("p", nil)
+	metadata.On("GetInstanceId").Return("i", false, nil)
+	oh.On("GetDebVersion", mock.Anything).Return("1.0.0", nil)
+	oh.On("GetServiceUptime", mock.Anything).Return(10*time.Minute, nil)
+	oh.On("GetSystemUptime").Return(1*time.Hour, nil)
+	oh.On("GetOsName").Return("Linux", nil)
+	oh.On("GetUname").Return("Linux", nil)
+	oh.On("GetArch").Return("x86_64", nil)
+	oh.On("GetMk8sClusterId").Return("")
+	dh.On("GetDCGMVersion").Return("3.3.7", nil)
+	dh.On("GetGpuInfo").Return("NVIDIA", 2, nil)
+	agentData := &mockAgentData{}
+	agentData.On("GetServiceName").Return("test-agent")
+	agentData.On("GetDebPackageName").Return("pkg")
+	agentData.On("GetAgentType").Return(agentmanager.AgentType_O11Y_AGENT)
+	agentData.On("GetLastSeenConfigVersion").Return(uint64(0))
+	agentData.On("IsAgentHealthy").Return(true, healthcheck.Response{})
+	agentData.On("GetLastUpdateError").Return(lastUpdateErr)
+	return c.fillRequest(agentData)
+}
+
+// guardWithTimeout returns a FileGuard that has recorded a timeout for a
+// writer-less FIFO, simulating a wedged-disk read during an earlier operation.
+func guardWithTimeout(t *testing.T) (*osutils.FileGuard, string) {
+	t.Helper()
+	guard := osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps)
+	fifo := filepath.Join(t.TempDir(), "hang")
+	if err := syscall.Mkfifo(fifo, 0600); err != nil {
+		t.Fatalf("mkfifo failed: %v", err)
+	}
+	_, _ = guard.ReadFile(fifo, 10*time.Millisecond) // blocks in open(2), times out, records fifo
+	return guard, fifo
+}
+
+func TestFillRequest_DiskUnavailable(t *testing.T) {
+	t.Run("drained timeout paths go to last_update_error", func(t *testing.T) {
+		guard, fifo := guardWithTimeout(t)
+		req := fillRequestWithGuard(guard, nil)
+		assert.Equal(t, "disk unavailable: "+fifo, req.LastUpdateError)
+	})
+
+	t.Run("combines with update error", func(t *testing.T) {
+		guard, fifo := guardWithTimeout(t)
+		req := fillRequestWithGuard(guard, fmt.Errorf("update boom"))
+		assert.Contains(t, req.LastUpdateError, "disk unavailable: "+fifo)
+		assert.Contains(t, req.LastUpdateError, "update boom")
+	})
+
+	t.Run("no timeouts leaves update error untouched", func(t *testing.T) {
+		guard := osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps)
+		req := fillRequestWithGuard(guard, fmt.Errorf("update boom"))
+		assert.Equal(t, "update boom", req.LastUpdateError)
+	})
+
+	t.Run("healthy request has empty last_update_error", func(t *testing.T) {
+		req := fillRequestWithGuard(osutils.NewFileGuard(osutils.DefaultMaxPendingFileOps), nil)
+		assert.Equal(t, "", req.LastUpdateError)
+	})
 }

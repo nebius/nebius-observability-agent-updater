@@ -17,6 +17,7 @@ type Config struct {
 	UpdateRepoScriptPath string                  `yaml:"update_repo_script_path"`
 	Mk8sClusterIdPath    string                  `yaml:"mk8s_cluster_id_path"`
 	HealthCheckPath      string                  `yaml:"healthcheck_path"`
+	StateDir             string                  `yaml:"state_dir"`
 }
 
 func GetDefaultConfig() *Config {
@@ -36,6 +37,7 @@ func GetDefaultConfig() *Config {
 		},
 		Mk8sClusterIdPath: "/usr/local/etc/mk8s-cluster-id",
 		HealthCheckPath:   "/var/log/nebius-logs",
+		StateDir:          "/var/lib/nebius-observability-agent-updater",
 		GRPC:              clientconfig.GetDefaultGrpcConfig(),
 		Logger: loggerhelper.LogConfig{
 			LogLevel: "INFO",
