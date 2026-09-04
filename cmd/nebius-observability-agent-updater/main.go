@@ -45,7 +45,7 @@ func run() int {
 		logger.Error("failed to create client", "error", err)
 		return 1
 	}
-	agentsList := []agents.AgentData{agents.NewO11yagent(cfg.StateDir, logger, fileGuard)}
+	agentsList := []agents.AgentData{agents.NewO11yagent(cfg.StateDir, logger, fileGuard, metadataReader)}
 	app := application.New(cfg, cli, logger, agentsList, oh, fileGuard)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
