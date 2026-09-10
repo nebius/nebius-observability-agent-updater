@@ -9,7 +9,7 @@ run:
 
 # Build the application
 build:
-	go build -o nebius-observability-agent-updater cmd/nebius-observability-agent-updater/main.go
+	CGO_ENABLED=0 go build -o nebius-observability-agent-updater cmd/nebius-observability-agent-updater/main.go
 
 build-deb: build
 	scripts/build_deb.sh
