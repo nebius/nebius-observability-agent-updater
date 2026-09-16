@@ -179,7 +179,7 @@ func (r *Reader) getInstanceData() (*instanceData, error) {
 	if err != nil {
 		if r.cachedInstance != nil {
 			r.logger.Warn("Failed to refresh instance-data from IMDS, using stale cache", "error", err)
-			return r.cachedInstance, nil
+			return r.keepStaleInstance(), nil
 		}
 		return nil, fmt.Errorf("failed to fetch instance-data from IMDS: %w", err)
 	}
@@ -188,7 +188,7 @@ func (r *Reader) getInstanceData() (*instanceData, error) {
 	if err := json.Unmarshal(body, &data); err != nil {
 		if r.cachedInstance != nil {
 			r.logger.Warn("Failed to parse instance-data JSON, using stale cache", "error", err)
-			return r.cachedInstance, nil
+			return r.keepStaleInstance(), nil
 		}
 		return nil, fmt.Errorf("failed to parse instance-data JSON: %w", err)
 	}
@@ -196,6 +196,14 @@ func (r *Reader) getInstanceData() (*instanceData, error) {
 	r.cachedInstance = &data
 	r.cachedFetchedAt = time.Now()
 	return r.cachedInstance, nil
+}
+
+// A failed refresh restarts the TTL so that callers are not each stalled for
+// the full IMDS timeout while it is down; instance data does not change for a
+// running VM, so serving it for another TTL is safe.
+func (r *Reader) keepStaleInstance() *instanceData {
+	r.cachedFetchedAt = time.Now()
+	return r.cachedInstance
 }
 
 func (r *Reader) fetchFromMetadataService(path string) ([]byte, error) {

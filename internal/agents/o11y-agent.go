@@ -1,11 +1,10 @@
 package agents
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/nebius/gosdk/proto/nebius/logging/v1/agentmanager"
@@ -20,40 +19,66 @@ import (
 // re-sends the version. Declared as var so tests can shorten it.
 var stateIOTimeout = 5 * time.Second
 
+type instanceIdSource interface {
+	GetInstanceId() (string, bool, error)
+}
+
+type configVersionState struct {
+	ConfigVersion uint64 `json:"config_version"`
+	InstanceId    string `json:"instance_id"`
+}
+
 type O11yagent struct {
 	lastUpdateError       error
 	lastSeenConfigVersion uint64
+	stateInstanceId       string
+	instanceIdSource      instanceIdSource
 	stateFilePath         string
 	logger                *slog.Logger
 	fileGuard             *osutils.FileGuard
 	oh                    *osutils.OsHelper
 }
 
-func NewO11yagent(stateDir string, logger *slog.Logger, fileGuard *osutils.FileGuard) *O11yagent {
+func NewO11yagent(stateDir string, logger *slog.Logger, fileGuard *osutils.FileGuard, ids instanceIdSource) *O11yagent {
 	o := &O11yagent{
-		oh:        osutils.NewOsHelper(fileGuard),
-		logger:    logger,
-		fileGuard: fileGuard,
+		oh:               osutils.NewOsHelper(fileGuard),
+		logger:           logger,
+		fileGuard:        fileGuard,
+		instanceIdSource: ids,
 	}
 	o.stateFilePath = filepath.Join(stateDir, o.GetServiceName()+".config-version")
-	o.lastSeenConfigVersion = o.loadLastSeenConfigVersion()
+	o.lastSeenConfigVersion, o.stateInstanceId = o.loadState()
 	return o
 }
 
-func (o *O11yagent) loadLastSeenConfigVersion() uint64 {
+func (o *O11yagent) loadState() (uint64, string) {
 	content, err := o.fileGuard.ReadFile(o.stateFilePath, stateIOTimeout)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			o.logger.Error("failed to read last seen config version", "error", err, "path", o.stateFilePath)
 		}
-		return 0
+		return 0, ""
 	}
-	version, err := strconv.ParseUint(strings.TrimSpace(string(content)), 10, 64)
-	if err != nil {
+	var state configVersionState
+	if err := json.Unmarshal(content, &state); err != nil {
 		o.logger.Warn("ignoring malformed last seen config version", "error", err, "path", o.stateFilePath)
-		return 0
+		return 0, ""
 	}
-	return version
+	if state.InstanceId == "" {
+		o.logger.Info("ignoring last seen config version without instance id", "path", o.stateFilePath)
+		return 0, ""
+	}
+	return state.ConfigVersion, state.InstanceId
+}
+
+// A fallback id comes from a file that may be part of a cloned disk image, so
+// it cannot prove the state belongs to this VM.
+func (o *O11yagent) ownInstanceId() string {
+	id, isFallback, err := o.instanceIdSource.GetInstanceId()
+	if err != nil || isFallback {
+		return ""
+	}
+	return id
 }
 
 var _ AgentData = (*O11yagent)(nil)
@@ -107,12 +132,38 @@ func (o *O11yagent) GetLastUpdateError() error {
 }
 
 func (o *O11yagent) GetLastSeenConfigVersion() uint64 {
+	id := o.ownInstanceId()
+	if id == "" {
+		return 0
+	}
+	if o.stateInstanceId != id {
+		if o.lastSeenConfigVersion != 0 {
+			o.logger.Info("discarding last seen config version recorded by another instance",
+				"state_instance_id", o.stateInstanceId, "instance_id", id)
+			o.persist(0, id)
+		}
+		o.lastSeenConfigVersion = 0
+		o.stateInstanceId = id
+	}
 	return o.lastSeenConfigVersion
 }
 
 func (o *O11yagent) SetLastSeenConfigVersion(version uint64) {
 	o.lastSeenConfigVersion = version
-	if err := o.fileGuard.WriteFileAtomic(o.stateFilePath, []byte(strconv.FormatUint(version, 10)), 0640, stateIOTimeout); err != nil {
+	id := o.ownInstanceId()
+	if id == "" {
+		return
+	}
+	o.stateInstanceId = id
+	o.persist(version, id)
+}
+
+func (o *O11yagent) persist(version uint64, id string) {
+	content, err := json.Marshal(configVersionState{ConfigVersion: version, InstanceId: id})
+	if err == nil {
+		err = o.fileGuard.WriteFileAtomic(o.stateFilePath, content, 0640, stateIOTimeout)
+	}
+	if err != nil {
 		o.logger.Warn("failed to persist last seen config version", "error", err, "path", o.stateFilePath)
 	}
 }
