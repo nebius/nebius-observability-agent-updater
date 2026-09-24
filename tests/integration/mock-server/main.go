@@ -172,7 +172,7 @@ func setupIMDSMock() *http.ServeMux {
 		if !requireMetadataHeader(w, r) {
 			return
 		}
-		_, _ = w.Write([]byte("mock-server:50051"))
+		_, _ = w.Write([]byte("mock-server.nebius.cloud:50051"))
 	})
 
 	mux.HandleFunc("/v1/iam/tsa/token/access_token", func(w http.ResponseWriter, r *http.Request) {

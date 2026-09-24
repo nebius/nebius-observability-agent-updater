@@ -9,6 +9,7 @@ services:
       updater-net:
         aliases:
           - metadata.nebius.internal
+          - mock-server.nebius.cloud
     ports:
       - "50051:50051"
       - "18080:8080"
