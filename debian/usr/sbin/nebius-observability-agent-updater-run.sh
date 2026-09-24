@@ -9,8 +9,13 @@ METADATA_HEADER="Metadata: true"
 # Try to get updater endpoint override from IMDS
 OVERRIDE=$(curl -s -f -H "$METADATA_HEADER" "${METADATA_BASE_URL}/v1/instance-data/o11y/updater-endpoint-override" 2>/dev/null || \
            curl -s -f -H "$METADATA_HEADER" "${METADATA_FALLBACK_URL}/v1/instance-data/o11y/updater-endpoint-override" 2>/dev/null || true)
+ALLOWED_ENDPOINT_RE='^[A-Za-z0-9.-]+\.nebius\.cloud(:[0-9]+)?$'
 if [ -n "$OVERRIDE" ]; then
-    UPDATER_ENDPOINT="$OVERRIDE"
+    if [[ "$OVERRIDE" =~ $ALLOWED_ENDPOINT_RE ]]; then
+        UPDATER_ENDPOINT="$OVERRIDE"
+    else
+        echo "ignoring updater endpoint override '$OVERRIDE': not under nebius.cloud" >&2
+    fi
 fi
 
 export GOMAXPROCS=1

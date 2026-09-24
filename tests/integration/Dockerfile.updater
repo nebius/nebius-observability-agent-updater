@@ -54,7 +54,7 @@ RUN echo -n "test-parent-id" > /mnt/cloud-metadata/parent-id && \
     echo -n "test-tsa-token" > /mnt/cloud-metadata/tsa-token
 
 # Write endpoint override to point to mock-server
-RUN echo -n "mock-server:50051" > /mnt/cloud-metadata/updater-endpoint-override
+RUN echo -n "mock-server.nebius.cloud:50051" > /mnt/cloud-metadata/updater-endpoint-override
 
 # Note: updater config is written after dpkg install by the test suite,
 # because the deb package overwrites /etc/nebius-observability-agent-updater/config.yaml
