@@ -351,3 +351,46 @@ func (s *UpdaterSuite) TestNopKeepsAgentRunning() {
 
 	assert.Equal(s.T(), pidBefore, pidAfter, "Fake-agent PID should NOT have changed with NOP action")
 }
+
+func (s *UpdaterSuite) TestConfigVersionBoundToInstance() {
+	const stateFile = "/var/lib/nebius-observability-agent-updater/nebius_observability_agent.config-version"
+
+	s.clearMock()
+	s.setMockResponse(&agentmanager.GetVersionResponse{
+		Action:        agentmanager.Action_NOP,
+		ConfigVersion: 7,
+	})
+
+	s.T().Log("Waiting for updater to accept and echo config version...")
+	time.Sleep(8 * time.Second)
+
+	req := s.getLatestRequest()
+	require.NotNil(s.T(), req, "Should have received at least one request")
+	assert.Equal(s.T(), uint64(7), req.GetLastSeenConfigVersion(), "request should echo the accepted config_version")
+
+	content, err := s.readFileInContainer(stateFile)
+	require.NoError(s.T(), err, "Should be able to read state file")
+	assert.Contains(s.T(), content, `"config_version":7`)
+	assert.Contains(s.T(), content, `"instance_id":"test-instance-id"`)
+
+	// State written by another instance, as carried over inside a cloned disk
+	// image, must not be echoed: a version above this region's counter would
+	// make the server answer NOP forever.
+	s.clearMock()
+	_, err = s.execInContainer("sh", "-c",
+		`echo '{"config_version":99,"instance_id":"computeinstance-other"}' > `+stateFile)
+	require.NoError(s.T(), err, "Should be able to write foreign state file")
+	s.startUpdater()
+
+	s.T().Log("Waiting for restarted updater to discard foreign state...")
+	time.Sleep(8 * time.Second)
+
+	req = s.getLatestRequest()
+	require.NotNil(s.T(), req, "Should have received at least one request after restart")
+	assert.Equal(s.T(), uint64(0), req.GetLastSeenConfigVersion(), "foreign config_version must not be echoed")
+
+	content, err = s.readFileInContainer(stateFile)
+	require.NoError(s.T(), err, "Should be able to read state file")
+	assert.Contains(s.T(), content, `"config_version":0`)
+	assert.Contains(s.T(), content, `"instance_id":"test-instance-id"`)
+}

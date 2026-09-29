@@ -448,6 +448,13 @@ func TestGetInstanceData_StaleCache_OnRefreshFailure(t *testing.T) {
 	parentId, err = reader.GetParentId()
 	require.NoError(t, err)
 	assert.Equal(t, "parent-original", parentId)
+	callsAfterFailedRefresh := callCount
+
+	// The failed refresh restarts the TTL, so the next call must not hit IMDS again.
+	parentId, err = reader.GetParentId()
+	require.NoError(t, err)
+	assert.Equal(t, "parent-original", parentId)
+	assert.Equal(t, callsAfterFailedRefresh, callCount)
 }
 
 func TestGetInstanceId_MetadataServiceDisabled(t *testing.T) {
