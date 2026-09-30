@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm AS fake-agent-builder
+FROM golang:1.25-bookworm AS fake-agent-builder
 
 WORKDIR /build
 COPY tests/integration/fake-agent/main.go .
