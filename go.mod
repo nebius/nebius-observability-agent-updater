@@ -2,6 +2,8 @@ module github.com/nebius/nebius-observability-agent-updater
 
 go 1.25.0
 
+toolchain go1.25.14
+
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/docker/docker v28.5.2+incompatible
