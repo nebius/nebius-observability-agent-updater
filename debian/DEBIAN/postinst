@@ -3,13 +3,12 @@ set -ex
 mkdir -p /var/lib/nebius-observability-agent-updater
 chmod 0640 /etc/nebius-observability-agent-updater/config.yaml
 
-# The updater upgrades this package on VMs with running workloads. A systemd
-# reload makes Docker containers lose GPU access ("Failed to initialize NVML:
-# Unknown Error") when the NVIDIA runtime hook gave them the GPUs and systemd
-# manages their cgroups. So the maintainer scripts never reload systemd: enable
-# and disable run with --no-reload, and there is no daemon-reload. A changed
-# unit file therefore applies only after the next systemd reload or VM reboot.
-# NVIDIA: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/troubleshooting.html#containers-losing-access-to-gpus-with-error-failed-to-initialize-nvml-unknown-error
+# A systemd reload makes Docker containers that got their GPUs from the NVIDIA
+# runtime hook lose them ("Failed to initialize NVML: Unknown Error"), so these
+# scripts never reload systemd. Each upgrade installs the unit file with a new
+# mtime, so restart warns that it changed on disk and asks for daemon-reload;
+# that warning is expected. A changed unit applies after the next reload or reboot.
+# https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/troubleshooting.html#containers-losing-access-to-gpus-with-error-failed-to-initialize-nvml-unknown-error
 systemctl --no-reload enable nebius_observability_agent_updater.service
 if [ "$(systemctl is-system-running)" != "offline" ]; then # Check if running under systemd
   systemctl restart nebius_observability_agent_updater.service
