@@ -5,7 +5,7 @@ case "$1" in
     purge)
         ;;
     remove)
-        systemctl disable nebius_observability_agent_updater.service
+        systemctl --no-reload disable nebius_observability_agent_updater.service
         if [ "$(systemctl is-system-running)" != "offline" ]; then # Check if running under systemd
             systemctl stop nebius_observability_agent_updater.service
         fi
